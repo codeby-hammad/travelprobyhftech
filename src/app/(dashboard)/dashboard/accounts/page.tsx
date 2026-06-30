@@ -68,7 +68,7 @@ export default async function AccountsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
-                  {items.map(acc => (
+                  {items.map((acc: any) => (
                     <tr key={acc.id} className="hover:bg-gray-50">
                       <td className="px-5 py-3 font-mono text-xs text-blue-600">{acc.code}</td>
                       <td className="px-5 py-3 font-medium text-gray-900">{acc.name}</td>
