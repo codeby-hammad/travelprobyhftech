@@ -2,6 +2,7 @@ import { createClient }  from '@/lib/supabase/server'
 import Link              from 'next/link'
 import { Package, Plus, TrendingUp, AlertTriangle } from 'lucide-react'
 import { formatCurrency, formatDate } from '@/lib/utils'
+import { requirePermission } from '@/lib/requirePermission'
 
 const statusStyles: Record<string, string> = {
   active:    'bg-green-50  text-green-700',
@@ -11,6 +12,8 @@ const statusStyles: Record<string, string> = {
 }
 
 export default async function InventoryPage() {
+    await requirePermission('tickets')
+
   const supabase = await createClient()
 
  const { data: batches } = await supabase

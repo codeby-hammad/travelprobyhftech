@@ -133,6 +133,7 @@ export type UmrahType     = 'individual' | 'group' | 'family' | 'vip'
 export type UmrahVisaType = 'umrah' | 'tourist' | 'ziarat' | 'multiple'
 
 export type FlightDetail = {
+  seat_no: import("react").JSX.Element
   id:              string
   organization_id: string
   booking_id:      string

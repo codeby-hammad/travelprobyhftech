@@ -2,8 +2,12 @@ import { createClient } from '@/lib/supabase/server'
 import ProfileForm       from '@/components/settings/ProfileForm'
 import OrganizationForm  from '@/components/settings/OrganizationForm'
 import TeamSection       from '@/components/settings/TeamSection'
+import { requirePermission } from '@/lib/requirePermission'
+
 
 export default async function SettingsPage() {
+    await requirePermission('settings')
+
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
 

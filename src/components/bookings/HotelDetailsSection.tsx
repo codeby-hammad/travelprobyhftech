@@ -25,6 +25,15 @@ const emptyHotel = {
   notes:           '',
 }
 
+// Best-effort city icon lookup — matches loosely so "Makkah"/"makkah"/"MAKKAH"
+// all resolve, since this field is free text on hotel_details, not a fixed enum
+function cityIcon(city?: string | null): string {
+  const c = (city ?? '').toLowerCase()
+  if (c.includes('makkah') || c.includes('mecca')) return '🕋'
+  if (c.includes('madinah') || c.includes('medina')) return '🕌'
+  return '🏨'
+}
+
 export default function HotelDetailsSection({ bookingId, organizationId, hotels }: Props) {
   const router   = useRouter()
   const supabase = createClient()
@@ -79,6 +88,8 @@ export default function HotelDetailsSection({ bookingId, organizationId, hotels 
     full_board:    'Full board',
   }
 
+  const formCityIcon = cityIcon(form.city)
+
   return (
     <div className="bg-white rounded-xl border border-gray-100 p-5">
       <div className="flex items-center justify-between mb-2">
@@ -101,9 +112,12 @@ export default function HotelDetailsSection({ bookingId, organizationId, hotels 
           {hotels.map(h => (
             <div key={h.id} className="border border-gray-100 rounded-lg p-4 text-sm">
               <div className="flex items-start justify-between mb-2">
-                <div>
-                  <p className="font-semibold text-gray-900">{h.hotel_name}</p>
-                  <p className="text-xs text-gray-500">{h.city}</p>
+                <div className="flex items-center gap-2">
+                  <span className="text-base">{cityIcon(h.city)}</span>
+                  <div>
+                    <p className="font-semibold text-gray-900">{h.hotel_name}</p>
+                    <p className="text-xs text-gray-500">{h.city}</p>
+                  </div>
                 </div>
                 <div className="flex items-center gap-2">
                   {h.stars && (
@@ -129,7 +143,7 @@ export default function HotelDetailsSection({ bookingId, organizationId, hotels 
                 {h.room_type       && <div>Room: {h.room_type}</div>}
                 {h.meal_plan       && <div>{mealLabels[h.meal_plan]}</div>}
                 {h.confirmation_no && <div>Conf#: <span className="font-mono font-medium text-gray-800">{h.confirmation_no}</span></div>}
-                {h.distance_haram  && <div>🕋 {h.distance_haram}</div>}
+                {h.distance_haram  && <div>{cityIcon(h.city)} {h.distance_haram}</div>}
               </div>
             </div>
           ))}
@@ -202,7 +216,7 @@ export default function HotelDetailsSection({ bookingId, organizationId, hotels 
                 </div>
                 <div className="col-span-2">
                   <label className="block text-xs font-medium text-gray-700 mb-1">
-                    Distance from Haram 🕋
+                    Distance from Haram {formCityIcon}
                   </label>
                   <input name="distance_haram" value={form.distance_haram} onChange={handleChange}
                     placeholder="e.g. 200m walking distance"

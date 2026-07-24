@@ -9,9 +9,13 @@ import { ArrowLeft } from 'lucide-react'
 type Props = {
   clients:  any[]
   bookings: any[]
+  initialBookingId?: string
+  initialClientId?: string
 }
 
-export default function NewVisaForm({ clients, bookings }: Props) {
+export default function NewVisaForm({
+  clients, bookings, initialBookingId = '', initialClientId = '',
+}: Props) {
   const router   = useRouter()
   const supabase = createClient()
 
@@ -19,8 +23,8 @@ export default function NewVisaForm({ clients, bookings }: Props) {
   const [error,   setError]   = useState<string | null>(null)
 
   const [form, setForm] = useState({
-    client_id:    '',
-    booking_id:   '',
+    client_id:    initialClientId,
+    booking_id:   initialBookingId,
     visa_type:    'umrah',
     destination:  'Saudi Arabia',
     status:       'not_applied',
@@ -34,7 +38,6 @@ export default function NewVisaForm({ clients, bookings }: Props) {
     fee_paid:      'false',
     notes:         '',
   })
-
   function handleChange(
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
   ) {

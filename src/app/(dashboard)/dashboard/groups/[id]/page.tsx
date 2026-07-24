@@ -5,6 +5,19 @@ import { ArrowLeft }    from 'lucide-react'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import BookingStatusBadge from '@/components/bookings/BookingStatusBadge'
 
+const VISA_STYLES: Record<string, string> = {
+  pending:   'bg-gray-100   text-gray-500   ',
+  submitted: 'bg-amber-50   text-amber-700  ',
+  approved:  'bg-emerald-50 text-emerald-700',
+  rejected:  'bg-red-50     text-red-600    ',
+}
+
+const GROUP_TYPE_LABELS: Record<string, string> = {
+  umrah:  'Umrah',
+  hajj:   'Hajj',
+  custom: 'Custom / Tour',
+}
+
 export default async function GroupDetailPage({
   params,
 }: {
@@ -29,9 +42,15 @@ export default async function GroupDetailPage({
 
   if (!group) notFound()
 
+  const isUmrah = group.group_type === 'umrah' || group.group_type === 'hajj'
+
   const totalPaid  = (group.passengers as any[])?.reduce((s: number, p: any) => s + Number(p.paid_amount),  0) ?? 0
   const totalOwed  = (group.passengers as any[])?.reduce((s: number, p: any) => s + Number(p.total_amount), 0) ?? 0
   const totalBalance = totalOwed - totalPaid
+
+  const visaApproved = isUmrah
+    ? (group.passengers as any[])?.filter((p: any) => p.visa_status === 'approved').length ?? 0
+    : 0
 
   return (
     <div className="p-8 max-w-4xl">
@@ -40,8 +59,18 @@ export default async function GroupDetailPage({
           <ArrowLeft size={20} />
         </Link>
         <div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
             <h1 className="text-2xl font-bold text-gray-900">{group.group_name}</h1>
+            {group.group_type && group.group_type !== 'custom' && (
+              <span className="bg-indigo-50 text-indigo-700 rounded-full px-2.5 py-1 text-xs font-semibold">
+                {GROUP_TYPE_LABELS[group.group_type] ?? group.group_type}
+              </span>
+            )}
+            {group.maktab_number && (
+              <span className="text-xs bg-gray-100 px-2 py-1 rounded-lg font-mono font-semibold text-gray-600">
+                MAKTAB {group.maktab_number}
+              </span>
+            )}
             {group.booking && (
               <BookingStatusBadge status={(group.booking as any).status} />
             )}
@@ -61,9 +90,10 @@ export default async function GroupDetailPage({
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-3 gap-4 mb-6">
+      <div className={`grid gap-4 mb-6 ${isUmrah ? 'grid-cols-4' : 'grid-cols-3'}`}>
         {[
           { label: 'Total passengers', value: group.passengers?.length ?? 0,             color: 'text-blue-600',   bg: 'bg-blue-50'   },
+          ...(isUmrah ? [{ label: 'Visa approved', value: `${visaApproved}/${group.passengers?.length ?? 0}`, color: 'text-emerald-600', bg: 'bg-emerald-50' }] : []),
           { label: 'Total collected',  value: formatCurrency(totalPaid,    (group.booking as any)?.currency ?? 'PKR'), color: 'text-green-600',  bg: 'bg-green-50'  },
           { label: 'Balance due',      value: formatCurrency(totalBalance, (group.booking as any)?.currency ?? 'PKR'), color: 'text-red-600',    bg: 'bg-red-50'    },
         ].map(card => (
@@ -93,10 +123,13 @@ export default async function GroupDetailPage({
               <th className="text-left px-4 py-3 text-gray-500 font-medium">#</th>
               <th className="text-left px-4 py-3 text-gray-500 font-medium">Passenger</th>
               <th className="text-left px-4 py-3 text-gray-500 font-medium">Passport</th>
+              {isUmrah && <th className="text-left px-4 py-3 text-gray-500 font-medium">Room</th>}
+              {isUmrah && <th className="text-left px-4 py-3 text-gray-500 font-medium">Bus</th>}
+              {isUmrah && <th className="text-left px-4 py-3 text-gray-500 font-medium">Visa</th>}
               <th className="text-left px-4 py-3 text-gray-500 font-medium">Amount</th>
               <th className="text-left px-4 py-3 text-gray-500 font-medium">Paid</th>
               <th className="text-left px-4 py-3 text-gray-500 font-medium">Balance</th>
-              <th className="text-left px-4 py-3 text-gray-500 font-medium">Visa</th>
+              {!isUmrah && <th className="text-left px-4 py-3 text-gray-500 font-medium">Visa</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-50">
@@ -122,6 +155,24 @@ export default async function GroupDetailPage({
                       </p>
                     )}
                   </td>
+
+                  {isUmrah && (
+                    <td className="px-4 py-3 text-gray-600">{p.room_number ?? '—'}</td>
+                  )}
+                  {isUmrah && (
+                    <td className="px-4 py-3 text-gray-600">{p.bus_number ?? '—'}</td>
+                  )}
+                  {isUmrah && (
+                    <td className="px-4 py-3">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold capitalize ${VISA_STYLES[p.visa_status] ?? VISA_STYLES.pending}`}>
+                        {p.visa_status ?? 'pending'}
+                      </span>
+                      {p.visa_number && (
+                        <p className="text-xs text-gray-400 font-mono mt-0.5">{p.visa_number}</p>
+                      )}
+                    </td>
+                  )}
+
                   <td className="px-4 py-3 font-medium">
                     {formatCurrency(p.total_amount, (group.booking as any)?.currency ?? 'PKR')}
                   </td>
@@ -133,19 +184,22 @@ export default async function GroupDetailPage({
                       {formatCurrency(balance, (group.booking as any)?.currency ?? 'PKR')}
                     </span>
                   </td>
-                  <td className="px-4 py-3">
-                    <Link href={`/dashboard/visa/new?client_id=${p.client_id}&booking_id=${group.booking_id}`}
-                      className="text-xs text-blue-600 hover:underline">
-                      + Add visa
-                    </Link>
-                  </td>
+
+                  {!isUmrah && (
+                    <td className="px-4 py-3">
+                      <Link href={`/dashboard/visa/new?client_id=${p.client_id}&booking_id=${group.booking_id}`}
+                        className="text-xs text-blue-600 hover:underline">
+                        + Add visa
+                      </Link>
+                    </td>
+                  )}
                 </tr>
               )
             })}
           </tbody>
           <tfoot>
             <tr className="bg-gray-50 border-t border-gray-200">
-              <td colSpan={3} className="px-4 py-3 font-semibold text-gray-700">Total</td>
+              <td colSpan={isUmrah ? 6 : 3} className="px-4 py-3 font-semibold text-gray-700">Total</td>
               <td className="px-4 py-3 font-bold text-gray-900">
                 {formatCurrency(totalOwed, (group.booking as any)?.currency ?? 'PKR')}
               </td>

@@ -1,32 +1,34 @@
-import { createClient }       from '@/lib/supabase/server'
-import NewSupplierInvoiceForm from '@/components/supplier-payments/NewSupplierInvoiceForm'
+import { createClient }  from '@/lib/supabase/server'
+import CreateInvoiceForm from '@/components/invoices/CreateInvoiceForm'
 
-export default async function NewSupplierInvoicePage() {
+export default async function NewInvoicePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ booking_id?: string }>
+}) {
+  const { booking_id } = await searchParams
   const supabase = await createClient()
 
-  const [{ data: suppliers }, { data: bookings }] = await Promise.all([
-    // Remove the .in('type',...) filter — get ALL active suppliers
-    supabase
-      .from('suppliers')
-      .select('id, name, type, phone, city')
-      .eq('is_active', true)
-      .order('name'),
+  const [{ data: bookings }, { data: booking }] = await Promise.all([
     supabase
       .from('bookings')
-      .select('id, booking_ref, client:clients(full_name)')
-      .in('status', ['confirmed', 'inquiry', 'quoted'])
-      .order('created_at', { ascending: false })
-      .limit(50),
+      .select('id, booking_ref, total_amount, paid_amount, currency, client:clients(full_name)')
+      .in('status', ['confirmed', 'quoted', 'inquiry'])
+      .order('created_at', { ascending: false }),
+    booking_id
+      ? supabase
+          .from('bookings')
+          .select('*, client:clients(*), package:packages(name)')
+          .eq('id', booking_id)
+          .single()
+      : Promise.resolve({ data: null }),
   ])
 
-  // Debug — remove after fixing
-  console.log('Suppliers found:', suppliers?.length, suppliers)
-
   return (
-    <div className="p-8 max-w-2xl">
-      <NewSupplierInvoiceForm
-        suppliers={suppliers ?? []}
-        bookings={bookings   ?? []}
+    <div className="p-8 max-w-3xl">
+      <CreateInvoiceForm
+        bookings={bookings ?? []}
+        preselectedBooking={booking}
       />
     </div>
   )

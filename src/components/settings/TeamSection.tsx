@@ -36,7 +36,12 @@ export default function TeamSection({
 
     if (!res.ok) { setError(data.error); setLoading(false); return }
 
-    setSuccess(`Invite sent to ${inviteEmail}`)
+    if (data.emailSent) {
+      setSuccess(`Account created and email sent to ${inviteEmail}`)
+    } else {
+      setSuccess(`Account created but EMAIL FAILED. Temp password: ${data.tempPassword ?? '(check server logs)'}`)
+    }
+
     setInviteEmail('')
     setShowInvite(false)
     setLoading(false)

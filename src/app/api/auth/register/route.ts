@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 
-// Small helper — makes a URL-safe slug right here so we don't depend on utils.ts
 function makeSlug(text: string): string {
   return text
     .toLowerCase()
@@ -11,69 +10,70 @@ function makeSlug(text: string): string {
 }
 
 export async function POST(request: NextRequest) {
-  // Wrap EVERYTHING in try/catch so we always return JSON, never HTML
   try {
-
-    // Parse the request body safely
     let body: { fullName?: string; agencyName?: string; email?: string; password?: string }
     try {
       body = await request.json()
     } catch {
-      return NextResponse.json(
-        { error: 'Invalid request body' },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: 'Invalid request body' }, { status: 400 })
     }
 
     const { fullName, agencyName, email, password } = body
 
-    // Validate all fields
     if (!fullName || !agencyName || !email || !password) {
-      return NextResponse.json(
-        { error: 'All fields are required' },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: 'All fields are required' }, { status: 400 })
     }
 
     if (password.length < 6) {
-      return NextResponse.json(
-        { error: 'Password must be at least 6 characters' },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: 'Password must be at least 6 characters' }, { status: 400 })
     }
 
-    // Create the admin Supabase client
     let admin
     try {
       admin = createAdminClient()
     } catch (e) {
       console.error('Failed to create admin client:', e)
-      return NextResponse.json(
-        { error: 'Server configuration error. Check SUPABASE_SERVICE_ROLE_KEY in .env.local' },
-        { status: 500 }
-      )
+      return NextResponse.json({ error: 'Server configuration error.' }, { status: 500 })
     }
 
-    // Step 1 — Create the organization
+    // Step 1 — Create organization
     const { data: org, error: orgError } = await admin
       .from('organizations')
-      .insert({
-        name: agencyName,
-        slug: makeSlug(agencyName),
-        plan: 'starter',
-      })
+      .insert({ name: agencyName, slug: makeSlug(agencyName), plan: 'starter' })
       .select()
       .single()
 
     if (orgError) {
-      console.error('Org creation failed:', orgError)
-      return NextResponse.json(
-        { error: 'Could not create organization: ' + orgError.message },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: 'Could not create organization: ' + orgError.message }, { status: 400 })
     }
 
-    // Step 2 — Create the auth user
+    // Step 2 — Seed default roles for this org
+    const { error: rolesError } = await admin.rpc('create_default_roles', {
+      org_id: org.id,
+    })
+    if (rolesError) {
+      console.error('Default roles creation failed:', rolesError)
+      // Non-fatal — continue
+    }
+
+    // Step 3 — Seed default accounts (chart of accounts)
+    const { error: accountsError } = await admin.rpc('create_default_accounts', {
+      org_id: org.id,
+    })
+    if (accountsError) {
+      console.error('Default accounts creation failed:', accountsError)
+      // Non-fatal — continue
+    }
+
+    // Step 4 — Get the Owner role ID we just created
+    const { data: ownerRole } = await admin
+      .from('staff_roles')
+      .select('id')
+      .eq('organization_id', org.id)
+      .eq('name', 'Owner')
+      .single()
+
+    // Step 5 — Create the auth user
     const { data: authData, error: authError } = await admin.auth.admin.createUser({
       email,
       password,
@@ -86,40 +86,32 @@ export async function POST(request: NextRequest) {
     })
 
     if (authError) {
-      console.error('User creation failed:', authError)
-      // Roll back: delete the org we just made
+      // Roll back org
       await admin.from('organizations').delete().eq('id', org.id)
-      return NextResponse.json(
-        { error: 'Could not create user: ' + authError.message },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: 'Could not create user: ' + authError.message }, { status: 400 })
     }
 
-    // Step 3 — Create profile manually (don't rely on trigger)
+    // Step 6 — Create profile with role_id + is_owner
     const { error: profileError } = await admin
       .from('profiles')
       .upsert({
         id:              authData.user.id,
         organization_id: org.id,
         full_name:       fullName,
-        email:           email,
+        email,
         role:            'agency_admin',
+        is_owner:        true,
+        role_id:         ownerRole?.id ?? null,
       })
 
     if (profileError) {
       console.error('Profile creation failed:', profileError)
-      // Still return success — user can log in, profile issue is fixable
-      console.warn('User created but profile failed — will need manual fix')
     }
 
     return NextResponse.json({ success: true })
 
   } catch (err) {
-    // This catches anything we missed above
     console.error('Unhandled register error:', err)
-    return NextResponse.json(
-      { error: 'Unexpected server error. Check terminal for details.' },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: 'Unexpected server error.' }, { status: 500 })
   }
 }

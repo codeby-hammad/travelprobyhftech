@@ -3,6 +3,18 @@ import Link from 'next/link'
 import { Users, Plus } from 'lucide-react'
 import { formatDate, formatCurrency } from '@/lib/utils'
 
+const GROUP_TYPE_LABELS: Record<string, string> = {
+  umrah:  'Umrah',
+  hajj:   'Hajj',
+  custom: 'Custom / Tour',
+}
+
+const GROUP_TYPE_STYLES: Record<string, string> = {
+  umrah:  'bg-indigo-50 text-indigo-700',
+  hajj:   'bg-purple-50 text-purple-700',
+  custom: 'bg-gray-100  text-gray-500',
+}
+
 export default async function GroupBookingsPage() {
   const supabase = await createClient()
 
@@ -46,12 +58,20 @@ export default async function GroupBookingsPage() {
             className="bg-white rounded-xl border border-gray-100 p-5 hover:shadow-md hover:border-blue-100 transition-all">
             <div className="flex items-start justify-between mb-3">
               <div>
-                <h3 className="font-semibold text-gray-900">{g.group_name}</h3>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="font-semibold text-gray-900">{g.group_name}</h3>
+                  {g.group_type && g.group_type !== 'custom' && (
+                    <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${GROUP_TYPE_STYLES[g.group_type] ?? GROUP_TYPE_STYLES.custom}`}>
+                      {GROUP_TYPE_LABELS[g.group_type] ?? g.group_type}
+                    </span>
+                  )}
+                </div>
                 <p className="text-xs text-gray-400 font-mono mt-0.5">
                   {g.booking?.booking_ref}
+                  {g.maktab_number && ` · Maktab ${g.maktab_number}`}
                 </p>
               </div>
-              <div className="bg-blue-50 text-blue-700 rounded-full px-2.5 py-1 text-xs font-semibold">
+              <div className="bg-blue-50 text-blue-700 rounded-full px-2.5 py-1 text-xs font-semibold shrink-0">
                 {g.passengers?.length ?? 0} pax
               </div>
             </div>

@@ -4,6 +4,8 @@ import EditClientForm   from '@/components/clients/EditClientForm'
 import Link             from 'next/link'
 import { ArrowLeft }    from 'lucide-react'
 import { formatDate }   from '@/lib/utils'
+import DocumentsSection from '@/components/documents/DocumentsSection'
+
 
 export default async function ClientDetailPage({
   params,
@@ -22,6 +24,8 @@ export default async function ClientDetailPage({
       .order('created_at', { ascending: false }),
   ])
 
+
+  
   if (!client) notFound()
 
   const statusColors: Record<string, string> = {
@@ -31,6 +35,7 @@ export default async function ClientDetailPage({
     cancelled: 'bg-red-50    text-red-700',
     completed: 'bg-gray-100  text-gray-600',
   }
+
 
   return (
     <div className="p-8 max-w-4xl">
@@ -86,6 +91,17 @@ export default async function ClientDetailPage({
             )}
           </div>
         </div>
+
+        {/* Documents */}
+        <div className="lg:col-span-3">
+          <DocumentsSection
+            entityType="client"
+            entityId={client.id}
+            organizationId={client.organization_id}
+            documentTypes={['passport', 'cnic', 'photo', 'other']}
+          />
+        </div>
+
       </div>
     </div>
   )

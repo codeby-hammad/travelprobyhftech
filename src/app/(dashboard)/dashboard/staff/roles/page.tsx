@@ -4,8 +4,12 @@ import { redirect }           from 'next/navigation'
 import Link                   from 'next/link'
 import { ArrowLeft }          from 'lucide-react'
 import RolesEditor            from '@/components/staff/RolesEditor'
+import { requirePermission } from '@/lib/requirePermission'
+
 
 export default async function RolesPage() {
+    await requirePermission('staff')
+
   const perms = await getUserPermissions()
   if (!can(perms, 'staff')) redirect('/dashboard')
 

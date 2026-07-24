@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { formatCurrency, formatDate } from '@/lib/utils'
+import { Download, Loader2, FileText, Plane, Building2, User, CreditCard, ShieldCheck, Users } from 'lucide-react'
 
 type Props = {
   booking:      any
@@ -11,6 +11,17 @@ type Props = {
   umrah:        any
   payments:     any[]
   visas:        any[]
+  group?:       any
+}
+
+function fmtDate(v?: string | null) {
+  if (!v) return '—'
+  return new Date(v).toLocaleDateString('en-PK', { day: '2-digit', month: 'short', year: 'numeric' })
+}
+
+function fmtDateTime(v?: string | null) {
+  if (!v) return '—'
+  return new Date(v).toLocaleString('en-PK', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
 export default function VoucherDownload({
@@ -21,633 +32,476 @@ export default function VoucherDownload({
   umrah,
   payments,
   visas,
+  group,
 }: Props) {
-  const [PDFComponents, setPDFComponents] = useState<any>(null)
+  const [ready,      setReady]      = useState(false)
+  const [generating, setGenerating] = useState(false)
 
-  useEffect(() => {
-    import('@react-pdf/renderer').then(mod => setPDFComponents(mod))
-  }, [])
+  useEffect(() => { setReady(true) }, [])
 
-  if (!PDFComponents) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-center">
-          <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-          <p className="text-gray-500 text-sm">Preparing voucher...</p>
-        </div>
-      </div>
-    )
+  async function handleDownload() {
+    setGenerating(true)
+    try {
+      const { pdf } = await import('@react-pdf/renderer')
+      const { default: BookingVoucherPDF } = await import('./BookingVoucherPDF')
+
+      const blob = await pdf(
+        <BookingVoucherPDF
+          booking={booking}
+          organization={organization}
+          flights={flights}
+          hotels={hotels}
+          umrah={umrah}
+          payments={payments}
+          visas={visas}
+        />
+      ).toBlob()
+
+      const url = URL.createObjectURL(blob)
+      const a   = document.createElement('a')
+      a.href     = url
+      a.download = `Voucher-${booking?.booking_ref ?? booking?.id}.pdf`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      console.error('PDF generation error:', err)
+      alert('Could not generate PDF. Please try again.')
+    } finally {
+      setGenerating(false)
+    }
   }
 
-  const {
-    Document, Page, Text, View,
-    StyleSheet, PDFDownloadLink, Line, Svg,
-  } = PDFComponents
+  async function handleDownloadAll() {
+    if (!group?.passengers?.length) return
+    setGenerating(true)
+    try {
+      const { pdf } = await import('@react-pdf/renderer')
+      const { default: GroupVoucherPDF } = await import('./GroupVoucherPDF')
 
-  const C = {
-    blue:       '#1d4ed8',
-    bluLight:   '#eff6ff',
-    green:      '#166534',
-    greenLight: '#f0fdf4',
-    orange:     '#9a3412',
-    orangeLight:'#fff7ed',
-    purple:     '#5b21b6',
-    purpleLight:'#faf5ff',
-    gray:       '#374151',
-    grayLight:  '#f9fafb',
-    grayMid:    '#6b7280',
-    border:     '#e5e7eb',
-    black:      '#111827',
-    white:      '#ffffff',
-    red:        '#dc2626',
+      const blob = await pdf(
+        <GroupVoucherPDF
+          booking={booking}
+          organization={organization}
+          flights={flights}
+          hotels={hotels}
+          umrah={umrah}
+          payments={payments}
+          visas={visas}
+          passengers={group.passengers}
+        />
+      ).toBlob()
+
+      const url = URL.createObjectURL(blob)
+      const a   = document.createElement('a')
+      a.href     = url
+      a.download = `Group-Vouchers-${booking?.booking_ref ?? booking?.id}.pdf`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      console.error('Group PDF generation error:', err)
+      alert('Could not generate group PDF. Please try again.')
+    } finally {
+      setGenerating(false)
+    }
   }
 
-  const s = StyleSheet.create({
-    page:           { padding: 36, fontFamily: 'Helvetica', fontSize: 9, color: C.gray, backgroundColor: C.white },
+  async function handleDownloadPassenger(passenger: any) {
+    setGenerating(true)
+    try {
+      const { pdf, Document } = await import('@react-pdf/renderer')
+      const { VoucherPageContent } = await import('./BookingVoucherPDF')
 
-    // Header
-    header:         { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20, paddingBottom: 16, borderBottom: `2 solid ${C.blue}` },
-    agencyName:     { fontSize: 20, fontFamily: 'Helvetica-Bold', color: C.blue },
-    agencyTag:      { fontSize: 8, color: C.grayMid, marginTop: 3 },
-    refBox:         { backgroundColor: C.bluLight, padding: '8 12', borderRadius: 6, alignItems: 'flex-end' },
-    refLabel:       { fontSize: 7, color: C.grayMid, textTransform: 'uppercase', letterSpacing: 0.5 },
-    refNumber:      { fontSize: 16, fontFamily: 'Helvetica-Bold', color: C.blue, marginTop: 2 },
-    statusBadge:    { fontSize: 7, color: C.white, backgroundColor: C.blue, padding: '2 6', borderRadius: 4, marginTop: 4, alignSelf: 'flex-end' },
+      const blob = await pdf(
+        <Document title={`Voucher — ${passenger.client?.full_name ?? ''}`}>
+          <VoucherPageContent
+            booking={booking}
+            organization={organization}
+            flights={flights}
+            hotels={hotels}
+            umrah={umrah}
+            payments={payments}
+            visas={visas}
+            passengerOverride={{
+              client:        passenger.client,
+              total_amount:  Number(passenger.total_amount ?? 0),
+              paid_amount:   Number(passenger.paid_amount ?? 0),
+              flight_number: passenger.flight_number,
+              pnr:           passenger.pnr,
+              seat_no:       passenger.seat_no,
+            }}
+          />
+        </Document>
+      ).toBlob()
 
-    // Section
-    section:        { marginBottom: 14 },
-    sectionHeader:  { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
-    sectionTitle:   { fontSize: 10, fontFamily: 'Helvetica-Bold', color: C.black },
-    sectionLine:    { flex: 1, height: 1, backgroundColor: C.border, marginLeft: 8 },
-
-    // Cards
-    card:           { backgroundColor: C.grayLight, borderRadius: 6, padding: '10 12', marginBottom: 6 },
-    cardBlue:       { backgroundColor: C.bluLight,    borderRadius: 6, padding: '10 12', marginBottom: 6 },
-    cardGreen:      { backgroundColor: C.greenLight,  borderRadius: 6, padding: '10 12', marginBottom: 6 },
-    cardOrange:     { backgroundColor: C.orangeLight, borderRadius: 6, padding: '10 12', marginBottom: 6 },
-    cardPurple:     { backgroundColor: C.purpleLight, borderRadius: 6, padding: '10 12', marginBottom: 6 },
-
-    // Grid
-    row:            { flexDirection: 'row', marginBottom: 4 },
-    col2:           { flex: 1 },
-    col3:           { flex: 1 },
-    col4:           { flex: 1 },
-    label:          { fontSize: 7, color: C.grayMid, textTransform: 'uppercase', letterSpacing: 0.3, marginBottom: 2 },
-    value:          { fontSize: 9, fontFamily: 'Helvetica-Bold', color: C.black },
-    valueNormal:    { fontSize: 9, color: C.gray },
-
-    // Table
-    tableHeader:    { flexDirection: 'row', backgroundColor: C.blue, borderRadius: '4 4 0 0', padding: '5 8' },
-    tableHeaderText:{ fontSize: 7, color: C.white, fontFamily: 'Helvetica-Bold', textTransform: 'uppercase' },
-    tableRow:       { flexDirection: 'row', borderBottom: `0.5 solid ${C.border}`, padding: '5 8' },
-    tableRowAlt:    { flexDirection: 'row', borderBottom: `0.5 solid ${C.border}`, padding: '5 8', backgroundColor: C.grayLight },
-    tableCell:      { fontSize: 8, color: C.gray },
-    tableCellBold:  { fontSize: 8, fontFamily: 'Helvetica-Bold', color: C.black },
-
-    // Payment
-    payRow:         { flexDirection: 'row', justifyContent: 'space-between', padding: '5 8', borderBottom: `0.5 solid ${C.border}` },
-    payTotal:       { flexDirection: 'row', justifyContent: 'space-between', padding: '8 8', backgroundColor: C.greenLight },
-    balanceRow:     { flexDirection: 'row', justifyContent: 'space-between', padding: '8 8', backgroundColor: '#fef2f2' },
-
-    // Footer
-    footer:         { position: 'absolute', bottom: 24, left: 36, right: 36 },
-    footerLine:     { borderTop: `1 solid ${C.border}`, marginBottom: 6 },
-    footerText:     { fontSize: 7, color: C.grayMid, textAlign: 'center' },
-
-    // Misc
-    tag:            { fontSize: 7, padding: '2 6', borderRadius: 4, alignSelf: 'flex-start' },
-    divider:        { borderBottom: `0.5 solid ${C.border}`, marginVertical: 8 },
-    bold:           { fontFamily: 'Helvetica-Bold' },
-    green:          { color: C.green },
-    red:            { color: C.red },
-    blue:           { color: C.blue },
-  })
-
-  const totalPaid    = payments.reduce((s, p) => s + Number(p.amount), 0)
-  const balance      = Number(booking.total_amount) - totalPaid
-  const mealLabels: Record<string, string> = {
-    room_only:     'Room only',
-    bed_breakfast: 'Bed & Breakfast',
-    half_board:    'Half Board',
-    full_board:    'Full Board',
+      const url = URL.createObjectURL(blob)
+      const a   = document.createElement('a')
+      a.href     = url
+      a.download = `Voucher-${passenger.client?.full_name ?? passenger.id}.pdf`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      console.error('Passenger PDF generation error:', err)
+      alert('Could not generate this passenger\'s PDF. Please try again.')
+    } finally {
+      setGenerating(false)
+    }
   }
 
-  function SectionTitle({ title, emoji }: { title: string; emoji: string }) {
-    return (
-      <View style={s.sectionHeader}>
-        <Text style={s.sectionTitle}>{emoji}  {title}</Text>
-        <View style={s.sectionLine} />
-      </View>
-    )
+  if (!ready) return null
+
+  const client     = booking?.client ?? {}
+  const pkg        = booking?.package ?? {}
+  const paidAmount = payments?.reduce((s: number, p: any) => s + Number(p.amount ?? 0), 0) ?? 0
+  const balance    = Number(booking?.total_amount ?? 0) - paidAmount
+  const isGroup    = !!group?.passengers?.length
+
+  const statusColors: Record<string, string> = {
+    confirmed: 'bg-emerald-50 text-emerald-700 border-emerald-100',
+    completed: 'bg-blue-50    text-blue-700    border-blue-100',
+    cancelled: 'bg-red-50     text-red-700     border-red-100',
+    inquiry:   'bg-amber-50   text-amber-700   border-amber-100',
+    quoted:    'bg-purple-50  text-purple-700  border-purple-100',
   }
-
-  function InfoRow({ label, value, bold }: { label: string; value: string; bold?: boolean }) {
-    return (
-      <View style={s.row}>
-        <Text style={[s.col2, s.label]}>{label}</Text>
-        <Text style={[s.col2, bold ? s.value : s.valueNormal]}>{value}</Text>
-      </View>
-    )
-  }
-
-  const VoucherDoc = () => (
-    <Document>
-      <Page size="A4" style={s.page}>
-
-        {/* ── HEADER ─────────────────────────────── */}
-        <View style={s.header}>
-          <View>
-            <Text style={s.agencyName}>{organization?.name ?? 'Travel Agency'}</Text>
-            <Text style={s.agencyTag}>✈  Official Booking Voucher</Text>
-            <Text style={[s.agencyTag, { marginTop: 6 }]}>
-              Issued: {new Date().toLocaleDateString('en-PK', { dateStyle: 'long' })}
-            </Text>
-          </View>
-          <View style={s.refBox}>
-            <Text style={s.refLabel}>Booking Reference</Text>
-            <Text style={s.refNumber}>{booking.booking_ref}</Text>
-            <Text style={s.statusBadge}>{booking.status.toUpperCase()}</Text>
-          </View>
-        </View>
-
-        {/* ── CLIENT DETAILS ──────────────────────── */}
-        <View style={s.section}>
-          <SectionTitle title="Client Details" emoji="👤" />
-          <View style={s.cardBlue}>
-            <View style={s.row}>
-              <View style={s.col2}>
-                <Text style={s.label}>Full name</Text>
-                <Text style={s.value}>{booking.client?.full_name}</Text>
-              </View>
-              <View style={s.col2}>
-                <Text style={s.label}>Phone</Text>
-                <Text style={s.value}>{booking.client?.phone ?? '—'}</Text>
-              </View>
-              <View style={s.col2}>
-                <Text style={s.label}>Email</Text>
-                <Text style={s.valueNormal}>{booking.client?.email ?? '—'}</Text>
-              </View>
-            </View>
-            {booking.client?.passport_number && (
-              <View style={[s.row, { marginTop: 6 }]}>
-                <View style={s.col2}>
-                  <Text style={s.label}>Passport number</Text>
-                  <Text style={[s.value, { fontFamily: 'Courier', fontSize: 10 }]}>
-                    {booking.client.passport_number}
-                  </Text>
-                </View>
-                <View style={s.col2}>
-                  <Text style={s.label}>Passport expiry</Text>
-                  <Text style={s.value}>
-                    {booking.client.passport_expiry
-                      ? formatDate(booking.client.passport_expiry)
-                      : '—'}
-                  </Text>
-                </View>
-                <View style={s.col2}>
-                  <Text style={s.label}>Nationality</Text>
-                  <Text style={s.value}>{booking.client.nationality ?? '—'}</Text>
-                </View>
-              </View>
-            )}
-          </View>
-        </View>
-
-        {/* ── TRIP DETAILS ────────────────────────── */}
-        <View style={s.section}>
-          <SectionTitle title="Trip Details" emoji="✈" />
-          <View style={s.card}>
-            <View style={s.row}>
-              <View style={s.col4}>
-                <Text style={s.label}>Package</Text>
-                <Text style={s.value}>{booking.package?.name ?? 'Custom booking'}</Text>
-              </View>
-              <View style={s.col4}>
-                <Text style={s.label}>Destination</Text>
-                <Text style={s.value}>{booking.package?.destination ?? '—'}</Text>
-              </View>
-              <View style={s.col4}>
-                <Text style={s.label}>Passengers</Text>
-                <Text style={s.value}>{booking.num_passengers}</Text>
-              </View>
-              <View style={s.col4}>
-                <Text style={s.label}>Agent</Text>
-                <Text style={s.value}>{booking.agent?.full_name ?? '—'}</Text>
-              </View>
-            </View>
-            <View style={[s.row, { marginTop: 8 }]}>
-              <View style={s.col4}>
-                <Text style={s.label}>Travel date</Text>
-                <Text style={s.value}>
-                  {booking.travel_date ? formatDate(booking.travel_date) : '—'}
-                </Text>
-              </View>
-              <View style={s.col4}>
-                <Text style={s.label}>Return date</Text>
-                <Text style={s.value}>
-                  {booking.return_date ? formatDate(booking.return_date) : '—'}
-                </Text>
-              </View>
-              <View style={s.col4}>
-                <Text style={s.label}>Duration</Text>
-                <Text style={s.value}>
-                  {booking.package?.duration_days
-                    ? `${booking.package.duration_days} days`
-                    : '—'}
-                </Text>
-              </View>
-              <View style={s.col4}>
-                <Text style={s.label}>Status</Text>
-                <Text style={[s.value, s.blue]}>
-                  {booking.status.toUpperCase()}
-                </Text>
-              </View>
-            </View>
-            {booking.notes && (
-              <View style={{ marginTop: 8, paddingTop: 8, borderTop: `0.5 solid ${C.border}` }}>
-                <Text style={s.label}>Notes</Text>
-                <Text style={s.valueNormal}>{booking.notes}</Text>
-              </View>
-            )}
-          </View>
-        </View>
-
-        {/* ── UMRAH DETAILS ───────────────────────── */}
-        {umrah && (
-          <View style={s.section}>
-            <SectionTitle title="Umrah Details" emoji="🕋" />
-            <View style={s.cardGreen}>
-              <View style={s.row}>
-                <View style={s.col4}>
-                  <Text style={s.label}>Umrah type</Text>
-                  <Text style={s.value}>{umrah.umrah_type}</Text>
-                </View>
-                <View style={s.col4}>
-                  <Text style={s.label}>Visa type</Text>
-                  <Text style={s.value}>{umrah.visa_type}</Text>
-                </View>
-                <View style={s.col4}>
-                  <Text style={s.label}>Departure city</Text>
-                  <Text style={s.value}>{umrah.departure_city}</Text>
-                </View>
-                <View style={s.col4}>
-                  <Text style={s.label}>Transport</Text>
-                  <Text style={s.value}>{umrah.transport_type.replace('_', ' ')}</Text>
-                </View>
-              </View>
-              <View style={[s.row, { marginTop: 8 }]}>
-                <View style={s.col4}>
-                  <Text style={s.label}>Makkah nights</Text>
-                  <Text style={s.value}>{umrah.makkah_nights} nights</Text>
-                </View>
-                <View style={s.col4}>
-                  <Text style={s.label}>Madinah nights</Text>
-                  <Text style={s.value}>{umrah.madinah_nights} nights</Text>
-                </View>
-                <View style={s.col4}>
-                  <Text style={s.label}>Ziarat Makkah</Text>
-                  <Text style={s.value}>{umrah.ziarat_makkah ? '✓ Yes' : '✗ No'}</Text>
-                </View>
-                <View style={s.col4}>
-                  <Text style={s.label}>Ziarat Madinah</Text>
-                  <Text style={s.value}>{umrah.ziarat_madinah ? '✓ Yes' : '✗ No'}</Text>
-                </View>
-              </View>
-              {(umrah.maktab_number || umrah.group_leader || umrah.ihram_point) && (
-                <View style={[s.row, { marginTop: 8 }]}>
-                  {umrah.maktab_number && (
-                    <View style={s.col3}>
-                      <Text style={s.label}>Maktab no.</Text>
-                      <Text style={s.value}>{umrah.maktab_number}</Text>
-                    </View>
-                  )}
-                  {umrah.group_leader && (
-                    <View style={s.col3}>
-                      <Text style={s.label}>Group leader</Text>
-                      <Text style={s.value}>{umrah.group_leader}</Text>
-                    </View>
-                  )}
-                  {umrah.ihram_point && (
-                    <View style={s.col3}>
-                      <Text style={s.label}>Ihram point</Text>
-                      <Text style={s.value}>{umrah.ihram_point}</Text>
-                    </View>
-                  )}
-                </View>
-              )}
-              {umrah.special_requests && (
-                <View style={{ marginTop: 8, paddingTop: 6, borderTop: `0.5 solid #bbf7d0` }}>
-                  <Text style={s.label}>Special requests</Text>
-                  <Text style={s.valueNormal}>{umrah.special_requests}</Text>
-                </View>
-              )}
-            </View>
-          </View>
-        )}
-
-        {/* ── PACKAGE INCLUDES ────────────────────── */}
-        {booking.package?.includes?.length > 0 && (
-          <View style={s.section}>
-            <SectionTitle title="What's Included" emoji="✅" />
-            <View style={s.card}>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
-                {booking.package.includes.map((item: string, i: number) => (
-                  <Text key={i} style={[s.valueNormal, { marginRight: 12, marginBottom: 3 }]}>
-                    ✓  {item}
-                  </Text>
-                ))}
-              </View>
-            </View>
-          </View>
-        )}
-
-        {/* ── FLIGHT DETAILS ──────────────────────── */}
-        {flights.length > 0 && (
-          <View style={s.section}>
-            <SectionTitle title="Flight Details" emoji="✈" />
-            {flights.map((f: any, i: number) => (
-              <View key={f.id} style={[s.cardBlue, { marginBottom: 6 }]}>
-                <View style={s.row}>
-                  <View style={{ flex: 0.5 }}>
-                    <Text style={[s.tag, {
-                      backgroundColor: f.trip_type === 'outbound' ? C.blue : C.purple,
-                      color:           C.white,
-                    }]}>
-                      {f.trip_type === 'outbound' ? 'OUTBOUND' : 'RETURN'}
-                    </Text>
-                  </View>
-                  <View style={s.col3}>
-                    <Text style={s.label}>Airline</Text>
-                    <Text style={s.value}>{f.airline ?? '—'}</Text>
-                  </View>
-                  <View style={s.col3}>
-                    <Text style={s.label}>Flight no.</Text>
-                    <Text style={[s.value, { fontFamily: 'Courier' }]}>{f.flight_number ?? '—'}</Text>
-                  </View>
-                  <View style={s.col3}>
-                    <Text style={s.label}>PNR</Text>
-                    <Text style={[s.value, { fontFamily: 'Courier', fontSize: 11 }]}>{f.pnr ?? '—'}</Text>
-                  </View>
-                  <View style={s.col3}>
-                    <Text style={s.label}>Class</Text>
-                    <Text style={s.value}>{f.seat_class ?? 'Economy'} • {f.baggage_kg}kg</Text>
-                  </View>
-                </View>
-                {(f.departure_city || f.arrival_city) && (
-                  <View style={[s.row, { marginTop: 8, alignItems: 'center' }]}>
-                    <View style={s.col3}>
-                      <Text style={s.label}>From</Text>
-                      <Text style={s.value}>{f.departure_city ?? '—'}</Text>
-                      {f.departure_time && (
-                        <Text style={[s.valueNormal, { fontSize: 8, marginTop: 2 }]}>
-                          {new Date(f.departure_time).toLocaleString('en-PK', {
-                            dateStyle: 'short', timeStyle: 'short'
-                          })}
-                        </Text>
-                      )}
-                    </View>
-                    <View style={{ flex: 0.3, alignItems: 'center' }}>
-                      <Text style={{ fontSize: 14, color: C.blue }}>→</Text>
-                    </View>
-                    <View style={s.col3}>
-                      <Text style={s.label}>To</Text>
-                      <Text style={s.value}>{f.arrival_city ?? '—'}</Text>
-                      {f.arrival_time && (
-                        <Text style={[s.valueNormal, { fontSize: 8, marginTop: 2 }]}>
-                          {new Date(f.arrival_time).toLocaleString('en-PK', {
-                            dateStyle: 'short', timeStyle: 'short'
-                          })}
-                        </Text>
-                      )}
-                    </View>
-                    {f.terminal && (
-                      <View style={s.col3}>
-                        <Text style={s.label}>Terminal</Text>
-                        <Text style={s.value}>{f.terminal}</Text>
-                      </View>
-                    )}
-                  </View>
-                )}
-              </View>
-            ))}
-          </View>
-        )}
-
-        {/* ── HOTEL DETAILS ───────────────────────── */}
-        {hotels.length > 0 && (
-          <View style={s.section}>
-            <SectionTitle title="Hotel Details" emoji="🏨" />
-            {hotels.map((h: any) => (
-              <View key={h.id} style={[s.cardOrange, { marginBottom: 6 }]}>
-                <View style={s.row}>
-                  <View style={s.col2}>
-                    <Text style={s.label}>Hotel</Text>
-                    <Text style={s.value}>{h.hotel_name}</Text>
-                    <Text style={[s.valueNormal, { fontSize: 8 }]}>
-                      {h.city}{h.stars ? ` • ${'★'.repeat(h.stars)}` : ''}
-                    </Text>
-                  </View>
-                  <View style={s.col3}>
-                    <Text style={s.label}>Check-in</Text>
-                    <Text style={s.value}>{h.check_in ? formatDate(h.check_in) : '—'}</Text>
-                  </View>
-                  <View style={s.col3}>
-                    <Text style={s.label}>Check-out</Text>
-                    <Text style={s.value}>{h.check_out ? formatDate(h.check_out) : '—'}</Text>
-                  </View>
-                  <View style={s.col3}>
-                    <Text style={s.label}>Nights</Text>
-                    <Text style={s.value}>{h.nights ?? '—'}</Text>
-                  </View>
-                </View>
-                <View style={[s.row, { marginTop: 6 }]}>
-                  {h.room_type && (
-                    <View style={s.col3}>
-                      <Text style={s.label}>Room type</Text>
-                      <Text style={s.valueNormal}>{h.room_type}</Text>
-                    </View>
-                  )}
-                  {h.meal_plan && (
-                    <View style={s.col3}>
-                      <Text style={s.label}>Meal plan</Text>
-                      <Text style={s.valueNormal}>{mealLabels[h.meal_plan] ?? h.meal_plan}</Text>
-                    </View>
-                  )}
-                  {h.confirmation_no && (
-                    <View style={s.col3}>
-                      <Text style={s.label}>Confirmation no.</Text>
-                      <Text style={[s.value, { fontFamily: 'Courier' }]}>{h.confirmation_no}</Text>
-                    </View>
-                  )}
-                  {h.distance_haram && (
-                    <View style={s.col3}>
-                      <Text style={s.label}>Distance Haram</Text>
-                      <Text style={s.valueNormal}>{h.distance_haram}</Text>
-                    </View>
-                  )}
-                </View>
-              </View>
-            ))}
-          </View>
-        )}
-
-        {/* ── VISA DETAILS ────────────────────────── */}
-        {visas.length > 0 && (
-          <View style={s.section}>
-            <SectionTitle title="Visa Information" emoji="🛂" />
-            <View style={{ borderRadius: 6, overflow: 'hidden' }}>
-              <View style={s.tableHeader}>
-                <Text style={[s.tableHeaderText, { flex: 2 }]}>Passenger</Text>
-                <Text style={[s.tableHeaderText, { flex: 1.5 }]}>Type</Text>
-                <Text style={[s.tableHeaderText, { flex: 1.5 }]}>Status</Text>
-                <Text style={[s.tableHeaderText, { flex: 1.5 }]}>Visa no.</Text>
-                <Text style={[s.tableHeaderText, { flex: 1.5 }]}>Expiry</Text>
-              </View>
-              {visas.map((v: any, i: number) => (
-                <View key={v.id} style={i % 2 === 0 ? s.tableRow : s.tableRowAlt}>
-                  <Text style={[s.tableCell, { flex: 2 }]}>{v.client?.full_name ?? '—'}</Text>
-                  <Text style={[s.tableCell, { flex: 1.5 }]}>{v.visa_type}</Text>
-                  <Text style={[s.tableCellBold, { flex: 1.5 }]}>{v.status.replace('_', ' ').toUpperCase()}</Text>
-                  <Text style={[s.tableCell, { flex: 1.5, fontFamily: 'Courier' }]}>{v.visa_number ?? '—'}</Text>
-                  <Text style={[s.tableCell, { flex: 1.5 }]}>{v.expiry_date ? formatDate(v.expiry_date) : '—'}</Text>
-                </View>
-              ))}
-            </View>
-          </View>
-        )}
-
-        {/* ── PAYMENT DETAILS ─────────────────────── */}
-        <View style={s.section}>
-          <SectionTitle title="Payment Details" emoji="💳" />
-          <View style={{ borderRadius: 6, overflow: 'hidden', border: `0.5 solid ${C.border}` }}>
-
-            {/* Header row */}
-            <View style={s.tableHeader}>
-              <Text style={[s.tableHeaderText, { flex: 2 }]}>Date</Text>
-              <Text style={[s.tableHeaderText, { flex: 2 }]}>Method</Text>
-              <Text style={[s.tableHeaderText, { flex: 2 }]}>Reference</Text>
-              <Text style={[s.tableHeaderText, { flex: 1.5, textAlign: 'right' }]}>Amount</Text>
-            </View>
-
-            {/* Payment rows */}
-            {payments.length === 0 ? (
-              <View style={s.tableRow}>
-                <Text style={[s.tableCell, { flex: 1, textAlign: 'center', color: C.grayMid }]}>
-                  No payments recorded
-                </Text>
-              </View>
-            ) : (
-              payments.map((p: any, i: number) => (
-                <View key={p.id} style={i % 2 === 0 ? s.tableRow : s.tableRowAlt}>
-                  <Text style={[s.tableCell, { flex: 2 }]}>{formatDate(p.paid_at)}</Text>
-                  <Text style={[s.tableCell, { flex: 2 }]}>{p.method.replace('_', ' ')}</Text>
-                  <Text style={[s.tableCell, { flex: 2, fontFamily: 'Courier' }]}>{p.reference_no ?? '—'}</Text>
-                  <Text style={[s.tableCellBold, { flex: 1.5, textAlign: 'right', color: C.green }]}>
-                    {formatCurrency(p.amount, p.currency)}
-                  </Text>
-                </View>
-              ))
-            )}
-
-            {/* Total paid */}
-            <View style={s.payTotal}>
-              <Text style={[s.bold, { fontSize: 9 }]}>Total paid</Text>
-              <Text style={[s.bold, { fontSize: 10, color: C.green }]}>
-                {formatCurrency(totalPaid, booking.currency)}
-              </Text>
-            </View>
-
-            {/* Balance due */}
-            {balance > 0 && (
-              <View style={s.balanceRow}>
-                <Text style={[s.bold, { fontSize: 9, color: C.red }]}>Balance due</Text>
-                <Text style={[s.bold, { fontSize: 10, color: C.red }]}>
-                  {formatCurrency(balance, booking.currency)}
-                </Text>
-              </View>
-            )}
-
-            {balance <= 0 && (
-              <View style={[s.payTotal, { backgroundColor: C.greenLight }]}>
-                <Text style={[s.bold, { fontSize: 9, color: C.green }]}>✓ Fully paid</Text>
-                <Text style={[s.bold, { fontSize: 9, color: C.green }]}>
-                  {formatCurrency(booking.total_amount, booking.currency)}
-                </Text>
-              </View>
-            )}
-          </View>
-        </View>
-
-        {/* ── FOOTER ──────────────────────────────── */}
-        <View style={s.footer} fixed>
-          <View style={s.footerLine} />
-          <Text style={s.footerText}>
-            {organization?.name}  •  Booking Ref: {booking.booking_ref}  •  Generated: {new Date().toLocaleDateString('en-PK', { dateStyle: 'long' })}
-          </Text>
-          <Text style={[s.footerText, { marginTop: 2 }]}>
-            This is an official booking voucher. Please carry this document during your travel.
-          </Text>
-        </View>
-
-      </Page>
-    </Document>
-  )
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-8">
-      <div className="bg-white rounded-2xl border border-gray-100 p-8 max-w-md w-full text-center shadow-sm">
+    <div className="min-h-screen bg-[#f4f6f9] p-6">
+      <div className="max-w-3xl mx-auto">
 
-        {/* Icon */}
-        <div className="w-16 h-16 bg-blue-50 rounded-2xl flex items-center justify-center mx-auto mb-5">
-          <span className="text-4xl">📄</span>
-        </div>
-
-        <h1 className="text-xl font-bold text-gray-900 mb-1">Booking Voucher</h1>
-        <p className="text-blue-600 font-mono font-medium mb-1">{booking.booking_ref}</p>
-        <p className="text-gray-500 text-sm mb-1">{booking.client?.full_name}</p>
-        <p className="text-gray-400 text-xs mb-6">
-          {booking.package?.destination ?? 'Custom booking'}
-          {booking.travel_date ? ` • ${formatDate(booking.travel_date)}` : ''}
-        </p>
-
-        {/* Contents preview */}
-        <div className="bg-gray-50 rounded-xl p-4 mb-6 text-left space-y-2">
-          <p className="text-xs font-semibold text-gray-600 mb-2">This voucher includes:</p>
-          {[
-            { icon: '👤', label: 'Client & passport details', always: true },
-            { icon: '✈️', label: 'Trip details & package info', always: true },
-            { icon: '🕋', label: 'Umrah details',              show: !!umrah           },
-            { icon: '✈️', label: `${flights.length} flight(s)`,show: flights.length > 0 },
-            { icon: '🏨', label: `${hotels.length} hotel(s)`,  show: hotels.length  > 0 },
-            { icon: '🛂', label: `${visas.length} visa(s)`,    show: visas.length   > 0 },
-            { icon: '💳', label: 'Payment history',            always: true },
-          ].filter(item => item.always || item.show).map((item, i) => (
-            <div key={i} className="flex items-center gap-2 text-xs text-gray-600">
-              <span>{item.icon}</span>
-              <span>{item.label}</span>
-              <span className="text-green-500 ml-auto">✓</span>
+        {/* ── Letterhead ─────────────────────────────────────────── */}
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden mb-5">
+          <div className="bg-gradient-to-r from-[#1e3a5f] to-[#284a72] px-7 py-6 flex items-center justify-between">
+            <div>
+              <p className="text-white text-lg font-bold tracking-tight">
+                {organization?.name ?? 'Travel Agency'}
+              </p>
+              <p className="text-white/50 text-[11px] mt-0.5">
+                {organization?.phone ?? ''}{organization?.phone && organization?.email ? ' · ' : ''}{organization?.email ?? ''}
+              </p>
             </div>
-          ))}
+            <div className="text-right">
+              <div className="inline-flex items-center gap-2 bg-white/10 px-3 py-1.5 rounded-lg mb-1.5">
+                <FileText size={14} className="text-white/80" />
+                <span className="text-white text-[11px] font-semibold tracking-widest uppercase">Booking Voucher</span>
+              </div>
+              <p className="text-white/70 text-xs font-mono">{booking?.booking_ref}</p>
+            </div>
+          </div>
+
+          <div className="px-7 py-4 flex items-center justify-between border-b border-gray-50">
+            <span className={`inline-flex text-xs px-3 py-1 rounded-full font-semibold capitalize border ${statusColors[booking?.status] ?? 'bg-gray-50 text-gray-600 border-gray-100'}`}>
+              {booking?.status ?? '—'}
+            </span>
+            <span className="text-xs text-gray-400">Issued {fmtDate(booking?.created_at)}</span>
+          </div>
         </div>
 
-        <PDFDownloadLink
-          document={<VoucherDoc />}
-          fileName={`${booking.booking_ref}-voucher.pdf`}
-          className="flex items-center justify-center gap-2 bg-blue-600 text-white px-6 py-3 rounded-xl hover:bg-blue-700 transition font-medium text-sm w-full"
+        {/* ── Client + Package ───────────────────────────────────── */}
+        <div className="grid grid-cols-2 gap-5 mb-5">
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <User size={14} className="text-[#1e3a5f]" />
+              <p className="text-xs font-bold text-gray-900 uppercase tracking-wide">
+                {isGroup ? 'Group Leader' : 'Client'}
+              </p>
+            </div>
+            <p className="text-sm font-semibold text-gray-900">{client?.full_name ?? '—'}</p>
+            {client?.phone && <p className="text-xs text-gray-500 mt-0.5">{client.phone}</p>}
+            {client?.email && <p className="text-xs text-gray-500">{client.email}</p>}
+            {client?.passport_number && (
+              <p className="text-xs text-gray-400 mt-2 font-mono">Passport: {client.passport_number}</p>
+            )}
+          </div>
+
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <Plane size={14} className="text-[#1e3a5f]" />
+              <p className="text-xs font-bold text-gray-900 uppercase tracking-wide">Package</p>
+            </div>
+            <p className="text-sm font-semibold text-gray-900">{pkg?.name ?? 'Custom booking'}</p>
+            <p className="text-xs text-gray-500 mt-0.5">{pkg?.destination ?? booking?.destination ?? '—'}</p>
+            <div className="flex gap-4 mt-2 text-xs text-gray-400">
+              <span>Travel: {fmtDate(booking?.travel_date)}</span>
+              <span>Return: {fmtDate(booking?.return_date)}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Group passengers — only shown for group bookings ──── */}
+        {isGroup && (
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 mb-5">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <Users size={14} className="text-[#1e3a5f]" />
+                <p className="text-xs font-bold text-gray-900 uppercase tracking-wide">
+                  Group passengers ({group.passengers.length})
+                </p>
+              </div>
+              <button
+                onClick={handleDownloadAll}
+                disabled={generating}
+                className="text-xs font-semibold text-indigo-600 hover:text-indigo-700 disabled:opacity-50"
+              >
+                Download all vouchers
+              </button>
+            </div>
+            <div className="space-y-1.5">
+              {group.passengers.map((p: any) => (
+                <div key={p.id} className="flex items-center justify-between text-sm py-1.5 border-b border-gray-50 last:border-0">
+                  <div className="min-w-0">
+                    <span className="text-gray-700">{p.client?.full_name ?? '—'}</span>
+                    {(p.flight_number || p.pnr || p.seat_no) && (
+                      <span className="text-[11px] text-gray-400 ml-2">
+                        {[p.flight_number, p.pnr, p.seat_no].filter(Boolean).join(' · ')}
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => handleDownloadPassenger(p)}
+                    disabled={generating}
+                    className="text-xs text-blue-600 hover:underline disabled:opacity-50 shrink-0 ml-3"
+                  >
+                    Download
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ── Flights ────────────────────────────────────────────── */}
+        {flights?.length > 0 && (
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 mb-5">
+            <div className="flex items-center gap-2 mb-4">
+              <Plane size={14} className="text-[#1e3a5f]" />
+              <p className="text-xs font-bold text-gray-900 uppercase tracking-wide">Flight details</p>
+              {isGroup && (
+                <span className="text-[10px] text-gray-400 font-normal normal-case">
+                  (shared — individual overrides shown in per-passenger vouchers)
+                </span>
+              )}
+            </div>
+            <div className="space-y-3">
+              {flights.map((f: any) => (
+                <div key={f.id} className="border border-gray-50 bg-gray-50/60 rounded-xl p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-sm font-bold text-gray-900">
+                      {f.airline ?? 'Airline TBD'} · {f.flight_number ?? '—'}
+                    </p>
+                    <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+                      {f.trip_type ?? ''}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-xs text-gray-600">
+                    <div>
+                      <p className="font-semibold text-gray-900">{f.departure_city ?? '—'}</p>
+                      <p className="text-gray-400">{fmtDateTime(f.departure_time)}</p>
+                    </div>
+                    <div className="flex-1 mx-3 h-px bg-gray-200 relative">
+                      <Plane size={11} className="absolute -top-1.5 left-1/2 -translate-x-1/2 text-gray-300 rotate-90" />
+                    </div>
+                    <div className="text-right">
+                      <p className="font-semibold text-gray-900">{f.arrival_city ?? '—'}</p>
+                      <p className="text-gray-400">{fmtDateTime(f.arrival_time)}</p>
+                    </div>
+                  </div>
+                  {(f.baggage_kg || f.seat_class || f.pnr || f.seat_no) && (
+                    <div className="flex gap-3 mt-2 pt-2 border-t border-gray-100 text-[11px] text-gray-400">
+                      {f.seat_class && <span>Class: {f.seat_class}</span>}
+                      {f.seat_no && <span>Seat: {f.seat_no}</span>}
+                      {f.baggage_kg && <span>Baggage: {f.baggage_kg}kg</span>}
+                      {f.pnr && <span>PNR: {f.pnr}</span>}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ── Hotels ─────────────────────────────────────────────── */}
+        {hotels?.length > 0 && (
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 mb-5">
+            <div className="flex items-center gap-2 mb-4">
+              <Building2 size={14} className="text-[#1e3a5f]" />
+              <p className="text-xs font-bold text-gray-900 uppercase tracking-wide">Hotel details</p>
+              {isGroup && (
+                <span className="text-[10px] text-gray-400 font-normal normal-case">(shared across group)</span>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              {hotels.map((h: any) => (
+                <div key={h.id} className="border border-gray-50 bg-gray-50/60 rounded-xl p-4">
+                  <p className="text-sm font-bold text-gray-900 capitalize">{h.city}</p>
+                  <p className="text-xs text-gray-700 mt-0.5">{h.hotel_name}</p>
+                  {h.distance_haram && <p className="text-[11px] text-gray-400">{h.distance_haram}</p>}
+                  <div className="flex gap-3 mt-2 text-[11px] text-gray-400">
+                    <span>{fmtDate(h.check_in)} → {fmtDate(h.check_out)}</span>
+                    {h.nights != null && <span>{h.nights} nights</span>}
+                  </div>
+                  {h.room_type && (
+                    <span className="inline-block mt-2 text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded-md capitalize">
+                      {h.room_type}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ── Umrah details ──────────────────────────────────────── */}
+        {umrah && (
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 mb-5">
+            <div className="flex items-center gap-2 mb-4">
+              <span className="text-sm">🕋</span>
+              <p className="text-xs font-bold text-gray-900 uppercase tracking-wide">Umrah details</p>
+              {isGroup && (
+                <span className="text-[10px] text-gray-400 font-normal normal-case">(shared across group)</span>
+              )}
+            </div>
+            <div className="grid grid-cols-3 gap-4 text-sm">
+              <div>
+                <p className="text-[11px] text-gray-400">Umrah Type</p>
+                <p className="font-medium text-gray-900 capitalize">{umrah.umrah_type ?? '—'}</p>
+              </div>
+              <div>
+                <p className="text-[11px] text-gray-400">Maktab No</p>
+                <p className="font-medium text-gray-900">{umrah.maktab_number ?? '—'}</p>
+              </div>
+              <div>
+                <p className="text-[11px] text-gray-400">Group Leader</p>
+                <p className="font-medium text-gray-900">{umrah.group_leader ?? '—'}</p>
+              </div>
+              <div>
+                <p className="text-[11px] text-gray-400">Departure City</p>
+                <p className="font-medium text-gray-900">{umrah.departure_city ?? '—'}</p>
+              </div>
+              <div>
+                <p className="text-[11px] text-gray-400">Ihram Point</p>
+                <p className="font-medium text-gray-900">{umrah.ihram_point ?? '—'}</p>
+              </div>
+              <div>
+                <p className="text-[11px] text-gray-400">Transport</p>
+                <p className="font-medium text-gray-900 capitalize">{umrah.transport_type ?? '—'}</p>
+              </div>
+              <div>
+                <p className="text-[11px] text-gray-400">Makkah Nights</p>
+                <p className="font-medium text-gray-900">{umrah.makkah_nights ?? '—'}</p>
+              </div>
+              <div>
+                <p className="text-[11px] text-gray-400">Madinah Nights</p>
+                <p className="font-medium text-gray-900">{umrah.madinah_nights ?? '—'}</p>
+              </div>
+              <div>
+                <p className="text-[11px] text-gray-400">Ziarat</p>
+                <p className="font-medium text-gray-900">
+                  {[umrah.ziarat_makkah && 'Makkah', umrah.ziarat_madinah && 'Madinah'].filter(Boolean).join(', ') || '—'}
+                </p>
+              </div>
+            </div>
+            {umrah.special_requests && (
+              <p className="text-xs text-gray-500 mt-3 pt-3 border-t border-gray-50">{umrah.special_requests}</p>
+            )}
+          </div>
+        )}
+
+        {/* ── Visas ──────────────────────────────────────────────── */}
+        {visas?.length > 0 && (
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 mb-5">
+            <div className="flex items-center gap-2 mb-4">
+              <ShieldCheck size={14} className="text-[#1e3a5f]" />
+              <p className="text-xs font-bold text-gray-900 uppercase tracking-wide">Visa information</p>
+            </div>
+            <div className="space-y-2">
+              {visas.map((v: any) => (
+                <div key={v.id} className="flex items-center justify-between text-sm border-b border-gray-50 last:border-0 pb-2 last:pb-0">
+                  <div>
+                    <p className="font-medium text-gray-900">{v.visa_type ?? 'Visa'} · {v.destination ?? '—'}</p>
+                    <p className="text-xs text-gray-400">
+                      No: {v.visa_number ?? '—'}
+                      {v.embassy && ` · ${v.embassy}`}
+                      {v.expiry_date && ` · Expires ${fmtDate(v.expiry_date)}`}
+                    </p>
+                  </div>
+                  <span className="text-xs font-semibold capitalize text-gray-600">{v.status ?? '—'}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ── Payment summary ────────────────────────────────────── */}
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 mb-5">
+          <div className="flex items-center gap-2 mb-4">
+            <CreditCard size={14} className="text-[#1e3a5f]" />
+            <p className="text-xs font-bold text-gray-900 uppercase tracking-wide">Payment summary</p>
+          </div>
+
+          <div className="flex items-center justify-between text-xs text-gray-500 mb-2">
+            <span>Payment progress</span>
+            <span className={balance <= 0 ? 'text-emerald-600 font-semibold' : 'text-amber-600 font-semibold'}>
+              {balance <= 0
+                ? 'Fully paid'
+                : `Balance: ${booking?.currency ?? 'PKR'} ${balance.toLocaleString()}`
+              }
+            </span>
+          </div>
+          <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-emerald-500 rounded-full transition-all"
+              style={{
+                width: `${Math.min(100, Number(booking?.total_amount) > 0
+                  ? (paidAmount / Number(booking.total_amount)) * 100
+                  : 0
+                )}%`
+              }}
+            />
+          </div>
+          <div className="flex justify-between text-xs text-gray-400 mt-1.5 mb-4">
+            <span>Paid: {booking?.currency ?? 'PKR'} {paidAmount.toLocaleString()}</span>
+            <span>Total: {booking?.currency ?? 'PKR'} {Number(booking?.total_amount ?? 0).toLocaleString()}</span>
+          </div>
+
+          {payments?.length > 0 && (
+            <div className="space-y-1.5 pt-3 border-t border-gray-50">
+              {payments.map((p: any) => (
+                <div key={p.id} className="flex items-center justify-between text-xs">
+                  <span className="text-gray-500">
+                    {p.method?.replace('_', ' ')} · {fmtDate(p.paid_at)}
+                    {p.reference_no && ` · Ref: ${p.reference_no}`}
+                  </span>
+                  <span className="font-semibold text-gray-900">
+                    {booking?.currency ?? 'PKR'} {Number(p.amount).toLocaleString()}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* ── Download ───────────────────────────────────────────── */}
+        <button
+          onClick={handleDownload}
+          disabled={generating}
+          className="w-full flex items-center justify-center gap-3 bg-[#1e3a5f] hover:bg-[#162d4a] text-white py-4 rounded-xl text-sm font-semibold disabled:opacity-60 transition-colors shadow-sm"
         >
-          {({ loading }: { loading: boolean }) =>
-            loading ? (
-              <span className="flex items-center gap-2">
-                <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                Generating PDF...
-              </span>
-            ) : (
-              <span>⬇ Download Complete Voucher PDF</span>
-            )
+          {generating
+            ? <Loader2 size={18} className="animate-spin" />
+            : <Download size={18} />
           }
-        </PDFDownloadLink>
+          {generating
+            ? 'Generating PDF — please wait...'
+            : isGroup
+              ? 'Download Group Leader Voucher PDF'
+              : 'Download Booking Voucher PDF'}
+        </button>
 
-        </div>
+        <p className="text-center text-xs text-gray-400 mt-3">
+          {isGroup
+            ? 'This downloads a single voucher for the group leader. Use the passenger list above for individual vouchers.'
+            : 'PDF includes all booking details, flights, hotels, and payment summary'}
+        </p>
+      </div>
     </div>
   )
 }

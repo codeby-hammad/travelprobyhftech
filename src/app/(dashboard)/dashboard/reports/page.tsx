@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { formatCurrency } from '@/lib/utils'
 import RevenueChart from '@/components/reports/RevenueChart'
-import ProfitChart  from '@/components/reports/ProfitChart'
+import ExportReportButton from '@/components/reports/ExportReportButton'
 import { TrendingUp, Users, Calendar, DollarSign, Receipt } from 'lucide-react'
 
 export default async function ReportsPage() {
@@ -22,13 +22,22 @@ export default async function ReportsPage() {
     { data: clients       },
     { data: profitData    },
     { data: monthlyPnl    },
+    { data: staffList     },
+    { data: groupBookings },
   ] = await Promise.all([
-    supabase.from('bookings').select('*, client:clients(full_name)').eq('organization_id', orgId),
+    supabase.from('bookings').select('*, client:clients(full_name), package:packages(name)').eq('organization_id', orgId),
     supabase.from('payments').select('*').eq('organization_id', orgId).eq('status', 'completed').order('paid_at', { ascending: true }),
     supabase.from('clients').select('id').eq('organization_id', orgId),
     supabase.from('booking_profit_summary').select('*').eq('organization_id', orgId),
     supabase.from('monthly_pnl').select('*').eq('organization_id', orgId).limit(6),
+    supabase.from('profiles').select('id, full_name').eq('organization_id', orgId),
+    supabase.from('group_bookings').select('booking_id, group_name, total_pax, group_type').eq('organization_id', orgId),
   ])
+
+  // Map booking_id -> group info, so group bookings can be labeled instead of
+  // silently attributing the whole group's total to one client
+  const groupByBookingId: Record<string, { group_name: string; total_pax: number; group_type: string }> = {}
+  groupBookings?.forEach((g: any) => { groupByBookingId[g.booking_id] = g })
 
   // KPI calculations
   const totalRevenue    = bookings?.reduce((s, b) => s + Number(b.total_amount), 0) ?? 0
@@ -49,19 +58,55 @@ export default async function ReportsPage() {
     .sort((a, b) => Number(b.gross_profit) - Number(a.gross_profit))
     .slice(0, 5)
 
-  // Top clients
-  const clientTotals: Record<string, { name: string; total: number; count: number }> = {}
+  // Top clients — labeled with group info when the booking was a group booking,
+  // so a group leader's tally isn't mistaken for personal spend
+  const clientTotals: Record<string, { name: string; total: number; count: number; groupCount: number }> = {}
   bookings?.forEach((b: any) => {
     if (!b.client) return
     if (!clientTotals[b.client_id]) {
-      clientTotals[b.client_id] = { name: b.client.full_name, total: 0, count: 0 }
+      clientTotals[b.client_id] = { name: b.client.full_name, total: 0, count: 0, groupCount: 0 }
     }
     clientTotals[b.client_id].total += Number(b.total_amount)
     clientTotals[b.client_id].count += 1
+    if (groupByBookingId[b.id]) {
+      clientTotals[b.client_id].groupCount += 1
+    }
   })
   const topClients = Object.values(clientTotals)
     .sort((a, b) => b.total - a.total)
     .slice(0, 5)
+
+  // Revenue by package
+  const packageTotals: Record<string, { name: string; total: number; count: number }> = {}
+  bookings?.forEach((b: any) => {
+    const pkgName = b.package?.name ?? 'Custom / No package'
+    if (!packageTotals[pkgName]) {
+      packageTotals[pkgName] = { name: pkgName, total: 0, count: 0 }
+    }
+    packageTotals[pkgName].total += Number(b.total_amount)
+    packageTotals[pkgName].count += 1
+  })
+  const revenueByPackage = Object.values(packageTotals)
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 8)
+  const maxPackageRevenue = Math.max(...revenueByPackage.map(p => p.total), 1)
+
+  // Revenue by agent
+  const staffMap: Record<string, string> = {}
+  staffList?.forEach((s: any) => { staffMap[s.id] = s.full_name })
+
+  const agentTotals: Record<string, { name: string; total: number; count: number }> = {}
+  bookings?.forEach((b: any) => {
+    const agentName = staffMap[b.agent_id] ?? 'Unassigned'
+    const key = b.agent_id ?? 'unassigned'
+    if (!agentTotals[key]) {
+      agentTotals[key] = { name: agentName, total: 0, count: 0 }
+    }
+    agentTotals[key].total += Number(b.total_amount)
+    agentTotals[key].count += 1
+  })
+  const revenueByAgent = Object.values(agentTotals)
+    .sort((a, b) => b.total - a.total)
 
   // Status breakdown
   const statusData = [
@@ -73,9 +118,18 @@ export default async function ReportsPage() {
 
   return (
     <div className="p-8">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-gray-900">Reports & Analytics</h1>
-        <p className="text-gray-500 text-sm mt-1">Full overview of your agency performance</p>
+      <div className="mb-8 flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Reports & Analytics</h1>
+          <p className="text-gray-500 text-sm mt-1">Full overview of your agency performance</p>
+        </div>
+        <ExportReportButton
+          bookings={bookings ?? []}
+          monthlyPnl={monthlyPnl ?? []}
+          topClients={topClients}
+          revenueByPackage={revenueByPackage}
+          revenueByAgent={revenueByAgent}
+        />
       </div>
 
       {/* KPI cards */}
@@ -159,6 +213,70 @@ export default async function ReportsPage() {
         </div>
       </div>
 
+      {/* Revenue by package + Revenue by agent */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        <div className="bg-white rounded-xl border border-gray-100 p-5 shadow-sm">
+          <h2 className="font-semibold text-gray-900 mb-4">Revenue by package</h2>
+          {revenueByPackage.length === 0 ? (
+            <p className="text-gray-400 text-sm text-center py-8">No data yet</p>
+          ) : (
+            <div className="space-y-3">
+              {revenueByPackage.map(p => (
+                <div key={p.name}>
+                  <div className="flex justify-between text-sm mb-1">
+                    <span className="text-gray-600 truncate max-w-[60%]">{p.name}</span>
+                    <span className="font-medium text-gray-900">
+                      {formatCurrency(p.total)} <span className="text-gray-400">({p.count})</span>
+                    </span>
+                  </div>
+                  <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-indigo-500 rounded-full"
+                      style={{ width: `${(p.total / maxPackageRevenue) * 100}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm">
+          <div className="p-5 border-b border-gray-100">
+            <h2 className="font-semibold text-gray-900">Revenue by agent</h2>
+          </div>
+          {revenueByAgent.length === 0 ? (
+            <p className="text-gray-400 text-sm text-center py-10">No data yet</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-100">
+                  <th className="text-left px-5 py-2.5 text-gray-500 font-medium text-xs">Agent</th>
+                  <th className="text-left px-5 py-2.5 text-gray-500 font-medium text-xs">Bookings</th>
+                  <th className="text-left px-5 py-2.5 text-gray-500 font-medium text-xs">Revenue</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {revenueByAgent.map(a => (
+                  <tr key={a.name} className="hover:bg-gray-50">
+                    <td className="px-5 py-2.5">
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-700 text-xs font-bold">
+                          {a.name.charAt(0)}
+                        </div>
+                        <span className="font-medium text-gray-900">{a.name}</span>
+                      </div>
+                    </td>
+                    <td className="px-5 py-2.5 text-gray-500">{a.count}</td>
+                    <td className="px-5 py-2.5 font-semibold text-gray-900">{formatCurrency(a.total)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+
       {/* Monthly P&L table */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm mb-6">
         <div className="p-5 border-b border-gray-100">
@@ -228,23 +346,31 @@ export default async function ReportsPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
-              {topProfitable.map((p: any) => (
-                <tr key={p.booking_id} className="hover:bg-gray-50">
-                  <td className="px-5 py-3 font-mono text-blue-600 font-medium">
-                    {p.booking_ref}
-                  </td>
-                  <td className="px-5 py-3">{formatCurrency(p.selling_price, p.currency)}</td>
-                  <td className="px-5 py-3 text-orange-600">{formatCurrency(p.total_cost, p.currency)}</td>
-                  <td className="px-5 py-3 font-semibold text-green-600">
-                    +{formatCurrency(p.gross_profit, p.currency)}
-                  </td>
-                  <td className="px-5 py-3">
-                    <span className="bg-green-50 text-green-700 text-xs px-2 py-1 rounded-full font-medium">
-                      {p.profit_margin}%
-                    </span>
-                  </td>
-                </tr>
-              ))}
+              {topProfitable.map((p: any) => {
+                const groupInfo = groupByBookingId[p.booking_id]
+                return (
+                  <tr key={p.booking_id} className="hover:bg-gray-50">
+                    <td className="px-5 py-3 font-mono text-blue-600 font-medium">
+                      {p.booking_ref}
+                      {groupInfo && (
+                        <span className="ml-2 bg-indigo-50 text-indigo-700 text-[10px] px-1.5 py-0.5 rounded-full font-sans font-semibold">
+                          Group · {groupInfo.total_pax} pax
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-5 py-3">{formatCurrency(p.selling_price, p.currency)}</td>
+                    <td className="px-5 py-3 text-orange-600">{formatCurrency(p.total_cost, p.currency)}</td>
+                    <td className="px-5 py-3 font-semibold text-green-600">
+                      +{formatCurrency(p.gross_profit, p.currency)}
+                    </td>
+                    <td className="px-5 py-3">
+                      <span className="bg-green-50 text-green-700 text-xs px-2 py-1 rounded-full font-medium">
+                        {p.profit_margin}%
+                      </span>
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
@@ -254,6 +380,9 @@ export default async function ReportsPage() {
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm">
         <div className="p-5 border-b border-gray-100">
           <h2 className="font-semibold text-gray-900">Top clients by value</h2>
+          <p className="text-xs text-gray-400 mt-0.5">
+            "Group" tag means this total includes bookings made on behalf of a group — not solely personal spend
+          </p>
         </div>
         {topClients.length === 0 ? (
           <p className="text-gray-400 text-sm text-center py-10">No data yet</p>
@@ -277,6 +406,11 @@ export default async function ReportsPage() {
                         {c.name.charAt(0)}
                       </div>
                       <span className="font-medium text-gray-900">{c.name}</span>
+                      {c.groupCount > 0 && (
+                        <span className="bg-indigo-50 text-indigo-700 text-[10px] px-1.5 py-0.5 rounded-full font-semibold">
+                          Group ×{c.groupCount}
+                        </span>
+                      )}
                     </div>
                   </td>
                   <td className="px-5 py-3 text-gray-500">{c.count}</td>

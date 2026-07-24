@@ -34,10 +34,18 @@ export default function InviteStaffForm({ orgId }: { orgId: string }) {
 
       if (!res.ok) throw new Error(data.error || 'Failed to create staff account')
 
-      setResult({
-        success: true,
-        message: `✅ Account created! Share these credentials with ${name}:\n\nEmail: ${email}\nPassword: ${tempPassword}\n\nThey can change it after first login.`,
-      })
+      if (data.emailSent) {
+        setResult({
+          success: true,
+          message: `✅ Account created and email sent to ${email}.`,
+        })
+      } else {
+        setResult({
+          success: true,
+          message: `⚠️ Account created but EMAIL FAILED TO SEND.\n\nShare these credentials manually:\n\nEmail: ${email}\nPassword: ${tempPassword}\n\nReason: ${data.warning || 'Unknown email error'}`,
+        })
+      }
+
       setEmail('')
       setName('')
       setTempPassword('')

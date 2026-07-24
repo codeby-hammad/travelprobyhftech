@@ -5,10 +5,40 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { ArrowLeft, Plus, Trash2, Users } from 'lucide-react'
+import { autofillTripDetailsFromPackage } from '@/app/actions/autofillTripDetails'
 
 type Props = {
   clients:  any[]
   packages: any[]
+}
+
+const VISA_OPTIONS = [
+  { value: 'pending',   label: 'Pending' },
+  { value: 'submitted', label: 'Submitted' },
+  { value: 'approved',  label: 'Approved' },
+  { value: 'rejected',  label: 'Rejected' },
+]
+
+const ROOM_TIERS = [
+  { value: 'sharing', label: 'Sharing',  priceField: 'base_price'    },
+  { value: 'quad',    label: 'Quad',     priceField: 'price_quad'    },
+  { value: 'triple',  label: 'Triple',   priceField: 'price_triple'  },
+  { value: 'double',  label: 'Double',   priceField: 'price_double'  },
+]
+
+function tierPrice(pkg: any, tier: string): number {
+  if (!pkg) return 0
+  const field = ROOM_TIERS.find(t => t.value === tier)?.priceField ?? 'base_price'
+  return Number(pkg[field] ?? pkg.base_price ?? 0)
+}
+
+// The tier most passengers picked — used as the single room type stamped
+// on the booking's autofilled hotel rows, since hotel_details holds one
+// row per city per booking, not one per passenger.
+function mostCommonTier(passengers: { room_type: string }[]): string {
+  const counts: Record<string, number> = {}
+  passengers.forEach(p => { counts[p.room_type] = (counts[p.room_type] ?? 0) + 1 })
+  return Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'quad'
 }
 
 export default function NewGroupForm({ clients, packages }: Props) {
@@ -24,35 +54,48 @@ export default function NewGroupForm({ clients, packages }: Props) {
     package_id:      '',
     travel_date:     '',
     return_date:     '',
-    total_amount:    '',
     currency:        'PKR',
     notes:           '',
+    group_type:      'custom',   // 'custom' | 'umrah' | 'hajj'
+    maktab_number:   '',
   })
 
-  // Passenger list — each has a client_id and individual amount
+  const isUmrah = form.group_type === 'umrah' || form.group_type === 'hajj'
+  const selectedPkg = packages.find(p => p.id === form.package_id) ?? null
+
+  const availableTiers = ROOM_TIERS.filter(
+    t => selectedPkg && (selectedPkg[t.priceField] ?? (t.value === 'sharing' ? selectedPkg.base_price : null)) != null
+  )
+
+  // Passenger list — each has a client_id, room tier, and individual amount
   const [passengers, setPassengers] = useState([
-    { client_id: '', total_amount: '', paid_amount: '0', notes: '' }
+    {
+      client_id: '', room_type: 'quad', total_amount: '', paid_amount: '0', notes: '',
+      visa_status: 'pending', visa_number: '', room_number: '', bus_number: '',
+    }
   ])
 
-  function handleChange(
+function handleChange(
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
   ) {
     const { name, value } = e.target
     setForm(prev => ({ ...prev, [name]: value }))
 
-    // Auto-fill price when package selected
-    if (name === 'package_id' && value) {
+    // Auto-fill each passenger's price from the newly selected package's
+    // tier pricing, keeping whatever room_type they already had selected
+  if (name === 'package_id' && value) {
       const pkg = packages.find(p => p.id === value)
       if (pkg) {
         setForm(prev => ({
           ...prev,
           package_id:   value,
-          total_amount: (pkg.base_price * passengers.length).toString(),
-          currency:     pkg.currency,
+          currency:     pkg.currency ?? prev.currency,
+          travel_date:  pkg.departure_date ? pkg.departure_date.slice(0, 10) : prev.travel_date,
+          return_date:  pkg.return_date    ? pkg.return_date.slice(0, 10)    : prev.return_date,
         }))
         setPassengers(prev => prev.map(p => ({
           ...p,
-          total_amount: pkg.base_price.toString(),
+          total_amount: tierPrice(pkg, p.room_type).toString(),
         })))
       }
     }
@@ -62,15 +105,25 @@ export default function NewGroupForm({ clients, packages }: Props) {
     setPassengers(prev => {
       const next = [...prev]
       next[index] = { ...next[index], [field]: value }
+
+      // Re-price this passenger if their room tier changed and a package is selected
+      if (field === 'room_type' && selectedPkg) {
+        next[index].total_amount = tierPrice(selectedPkg, value).toString()
+      }
       return next
     })
   }
 
   function addPassenger() {
-    const pkg = packages.find(p => p.id === form.package_id)
+    const defaultTier = availableTiers[0]?.value ?? 'quad'
     setPassengers(prev => [
       ...prev,
-      { client_id: '', total_amount: pkg?.base_price?.toString() ?? '', paid_amount: '0', notes: '' }
+      {
+        client_id: '', room_type: defaultTier,
+        total_amount: selectedPkg ? tierPrice(selectedPkg, defaultTier).toString() : '',
+        paid_amount: '0', notes: '',
+        visa_status: 'pending', visa_number: '', room_number: '', bus_number: '',
+      }
     ])
   }
 
@@ -91,30 +144,51 @@ export default function NewGroupForm({ clients, packages }: Props) {
     }
 
     const { data: { user } } = await supabase.auth.getUser()
-    const { data: profile }  = await supabase
+    if (!user) {
+      setError('Not signed in')
+      setLoading(false)
+      return
+    }
+
+    const { data: profile, error: profileError } = await supabase
       .from('profiles')
       .select('organization_id')
-      .eq('id', user!.id)
+      .eq('id', user.id)
       .single()
 
-    const orgId = profile!.organization_id
+    if (profileError || !profile || !profile.organization_id) {
+      setError('Could not determine your organization')
+      setLoading(false)
+      return
+    }
+
+    const orgId = profile.organization_id
+
+    // Always derive the booking total from the live sum of passenger amounts
+    const computedTotal = passengers.reduce((s, p) => s + parseFloat(p.total_amount || '0'), 0)
+    const computedPaid  = passengers.reduce((s, p) => s + parseFloat(p.paid_amount  || '0'), 0)
+
+    // Room type folded into notes — same convention the single "Book Now"
+    // flow uses, so the booking page's extractRoomType() picks it up too
+    const groupRoomType = mostCommonTier(passengers)
+    const roomTypeNote = form.package_id ? `Room type: ${groupRoomType}` : null
 
     // Step 1 — Create the main booking
     const { data: booking, error: bookingError } = await supabase
       .from('bookings')
       .insert({
         organization_id: orgId,
-        agent_id:        user!.id,
+        agent_id:        user.id,
         client_id:       form.group_leader_id || passengers[0].client_id,
         package_id:      form.package_id      || null,
         travel_date:     form.travel_date     || null,
         return_date:     form.return_date     || null,
         num_passengers:  passengers.length,
-        total_amount:    parseFloat(form.total_amount || '0'),
-        paid_amount:     0,
+        total_amount:    computedTotal,
+        paid_amount:     computedPaid,
         currency:        form.currency,
         status:          'inquiry',
-        notes:           form.notes           || null,
+        notes:           [roomTypeNote, form.notes || null].filter(Boolean).join('\n') || null,
       })
       .select()
       .single()
@@ -131,6 +205,8 @@ export default function NewGroupForm({ clients, packages }: Props) {
         group_leader_id: form.group_leader_id || null,
         total_pax:       passengers.length,
         notes:           form.notes           || null,
+        group_type:      form.group_type,
+        maktab_number:   isUmrah ? (form.maktab_number || null) : null,
       })
       .select()
       .single()
@@ -148,12 +224,31 @@ export default function NewGroupForm({ clients, packages }: Props) {
           total_amount:     parseFloat(p.total_amount || '0'),
           paid_amount:      parseFloat(p.paid_amount  || '0'),
           notes:            p.notes                   || null,
+          visa_status:      isUmrah ? p.visa_status           : 'pending',
+          visa_number:      isUmrah ? (p.visa_number || null) : null,
+          room_number:      isUmrah ? (p.room_number || null) : null,
+          bus_number:       isUmrah ? (p.bus_number  || null) : null,
         }))
       )
 
     if (passengersError) { setError(passengersError.message); setLoading(false); return }
 
-    router.push(`/dashboard/groups/${group.id}`)
+    // Step 4 — Autofill flight/hotel/umrah from the package, same action
+    // the single-booking flow uses. Non-fatal: a group booking still gets
+    // created even if this fails, staff can just click the button manually.
+    if (form.package_id) {
+      await autofillTripDetailsFromPackage({
+        bookingId:      booking.id,
+        organizationId: orgId,
+        packageId:      form.package_id,
+        roomType:       groupRoomType,
+        maktabNumber:   isUmrah ? (form.maktab_number || null) : null,
+      })
+    }
+
+    // Land on the same booking detail page the single-booking flow uses —
+    // same Package & Trip Details card, same Voucher download button
+    router.push(`/dashboard/bookings/${booking.id}`)
     router.refresh()
   }
 
@@ -178,6 +273,30 @@ export default function NewGroupForm({ clients, packages }: Props) {
         <div className="bg-white rounded-xl border border-gray-100 p-6 space-y-4">
           <h2 className="font-semibold text-gray-900">Group information</h2>
 
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Group type</label>
+            <div className="flex flex-wrap gap-2">
+              {[
+                { value: 'custom', label: 'Custom / Tour' },
+                { value: 'umrah',  label: 'Umrah' },
+                { value: 'hajj',   label: 'Hajj' },
+              ].map(opt => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setForm(prev => ({ ...prev, group_type: opt.value }))}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition ${
+                    form.group_type === opt.value
+                      ? 'bg-blue-600 text-white border-blue-600'
+                      : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -196,8 +315,29 @@ export default function NewGroupForm({ clients, packages }: Props) {
                   <option key={c.id} value={c.id}>{c.full_name}</option>
                 ))}
               </select>
+              {!form.group_leader_id && passengers[0]?.client_id && (
+                <p className="text-xs text-amber-600 mt-1">
+                  No leader selected — {clients.find(c => c.id === passengers[0].client_id)?.full_name ?? 'Passenger 1'} will
+                  be used as the primary contact on this booking.
+                </p>
+              )}
+              {!form.group_leader_id && !passengers[0]?.client_id && (
+                <p className="text-xs text-gray-400 mt-1">
+                  No leader selected yet — pick one, or the first passenger you add will become the primary contact.
+                </p>
+              )}
             </div>
-            <div>
+
+            {isUmrah && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Maktab Number</label>
+                <input name="maktab_number" value={form.maktab_number} onChange={handleChange}
+                  placeholder="e.g. 12"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+            )}
+
+            <div className="md:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-1">Package</label>
               <select name="package_id" value={form.package_id} onChange={handleChange}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
@@ -206,6 +346,30 @@ export default function NewGroupForm({ clients, packages }: Props) {
                   <option key={p.id} value={p.id}>{p.name} — {p.destination}</option>
                 ))}
               </select>
+
+              {selectedPkg && (
+                <>
+                  <p className="text-xs text-emerald-600 mt-1">
+                    Flight, hotel & Umrah details will be auto-filled from this package once the group is created.
+                  </p>
+
+                  {availableTiers.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {availableTiers.map(t => (
+                        <div
+                          key={t.value}
+                          className="flex items-center gap-1.5 bg-emerald-50 border border-emerald-100 rounded-lg px-2.5 py-1"
+                        >
+                          <span className="text-xs font-semibold text-emerald-700 capitalize">{t.label}</span>
+                          <span className="text-xs text-emerald-600">
+                            {form.currency} {tierPrice(selectedPkg, t.value).toLocaleString()}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Currency</label>
@@ -283,6 +447,29 @@ export default function NewGroupForm({ clients, packages }: Props) {
                       ))}
                     </select>
                   </div>
+
+                  {selectedPkg && availableTiers.length > 0 && (
+                    <div className="md:col-span-4">
+                      <label className="block text-xs font-medium text-gray-700 mb-1">Room tier</label>
+                      <div className="flex flex-wrap gap-1.5">
+                        {availableTiers.map(t => (
+                          <button
+                            key={t.value}
+                            type="button"
+                            onClick={() => updatePassenger(i, 'room_type', t.value)}
+                            className={`px-2.5 py-1 rounded-lg text-xs font-medium border capitalize transition ${
+                              p.room_type === t.value
+                                ? 'bg-emerald-600 text-white border-emerald-600'
+                                : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+                            }`}
+                          >
+                            {t.label} — {tierPrice(selectedPkg, t.value).toLocaleString()}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  
                   <div>
                     <label className="block text-xs font-medium text-gray-700 mb-1">
                       Amount ({form.currency})
@@ -299,6 +486,42 @@ export default function NewGroupForm({ clients, packages }: Props) {
                       placeholder="0"
                       className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white" />
                   </div>
+
+                  {isUmrah && (
+                    <>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">Visa Status</label>
+                        <select value={p.visa_status}
+                          onChange={e => updatePassenger(i, 'visa_status', e.target.value)}
+                          className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+                          {VISA_OPTIONS.map(v => (
+                            <option key={v.value} value={v.value}>{v.label}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">Visa Number</label>
+                        <input value={p.visa_number}
+                          onChange={e => updatePassenger(i, 'visa_number', e.target.value)}
+                          placeholder="Optional"
+                          className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">Room Number</label>
+                        <input value={p.room_number}
+                          onChange={e => updatePassenger(i, 'room_number', e.target.value)}
+                          placeholder="e.g. 101"
+                          className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">Bus Number</label>
+                        <input value={p.bus_number}
+                          onChange={e => updatePassenger(i, 'bus_number', e.target.value)}
+                          placeholder="e.g. Bus 2"
+                          className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white" />
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
             ))}

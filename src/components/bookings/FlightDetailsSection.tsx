@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import { Plane, Plus, Trash2, ChevronDown, ChevronUp } from 'lucide-react'
+import { Plane, Plus, Trash2, ChevronDown, ChevronUp, Pencil, X } from 'lucide-react'
 import type { FlightDetail } from '@/types'
 
 type Props = {
@@ -17,6 +17,7 @@ const emptyFlight = {
   airline:        '',
   flight_number:  '',
   pnr:            '',
+  seat_no:        '',
   departure_city: '',
   arrival_city:   '',
   departure_time: '',
@@ -27,18 +28,155 @@ const emptyFlight = {
   notes:          '',
 }
 
+function toFormValues(f: FlightDetail): Record<string, string> {
+  return {
+    trip_type:      f.trip_type ?? 'outbound',
+    airline:        f.airline ?? '',
+    flight_number:  f.flight_number ?? '',
+    pnr:            f.pnr ?? '',
+    seat_no:        (f as any).seat_no ?? '',
+    departure_city: f.departure_city ?? '',
+    arrival_city:   f.arrival_city ?? '',
+    departure_time: f.departure_time ? f.departure_time.slice(0, 16) : '',
+    arrival_time:   f.arrival_time ? f.arrival_time.slice(0, 16) : '',
+    terminal:       f.terminal ?? '',
+    seat_class:     f.seat_class ?? 'economy',
+    baggage_kg:     String(f.baggage_kg ?? 23),
+    notes:          f.notes ?? '',
+  }
+}
+
+// ── Moved OUTSIDE FlightDetailsSection — top-level, sibling function.
+// This is the actual fix: as long as this was declared inside
+// FlightDetailsSection's body (even after accepting props), React saw a
+// brand-new component type on every keystroke and remounted the input,
+// which is what caused focus loss after one character. Declaring it here,
+// at module scope, gives it a stable identity across renders.
+function FlightFormFields({
+  form,
+  onChange,
+}: {
+  form: Record<string, string>
+  onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => void
+}) {
+  return (
+    <div className="grid grid-cols-2 gap-3">
+      <div>
+        <label className="block text-xs font-medium text-gray-700 mb-1">Type</label>
+        <select name="trip_type" value={form.trip_type} onChange={onChange}
+          className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+          <option value="outbound">Outbound</option>
+          <option value="return">Return</option>
+        </select>
+      </div>
+      <div>
+        <label className="block text-xs font-medium text-gray-700 mb-1">Airline</label>
+        <input name="airline" value={form.airline} onChange={onChange}
+          placeholder="e.g. PIA, Emirates"
+          className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white" />
+      </div>
+      <div>
+        <label className="block text-xs font-medium text-gray-700 mb-1">Flight no.</label>
+        <input name="flight_number" value={form.flight_number} onChange={onChange}
+          placeholder="e.g. PK-301"
+          className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white" />
+      </div>
+      <div>
+        <label className="block text-xs font-medium text-gray-700 mb-1">PNR</label>
+        <input name="pnr" value={form.pnr} onChange={onChange}
+          placeholder="e.g. ABC123"
+          className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white font-mono" />
+      </div>
+      <div>
+        <label className="block text-xs font-medium text-gray-700 mb-1">Seat No.</label>
+        <input name="seat_no" value={form.seat_no} onChange={onChange}
+          placeholder="e.g. 14A"
+          className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white font-mono" />
+      </div>
+      <div>
+        <label className="block text-xs font-medium text-gray-700 mb-1">From</label>
+        <input name="departure_city" value={form.departure_city} onChange={onChange}
+          placeholder="e.g. Karachi (KHI)"
+          className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white" />
+      </div>
+      <div>
+        <label className="block text-xs font-medium text-gray-700 mb-1">To</label>
+        <input name="arrival_city" value={form.arrival_city} onChange={onChange}
+          placeholder="e.g. Jeddah (JED)"
+          className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white" />
+      </div>
+      <div>
+        <label className="block text-xs font-medium text-gray-700 mb-1">Departure</label>
+        <input name="departure_time" type="datetime-local" value={form.departure_time} onChange={onChange}
+          className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white" />
+      </div>
+      <div>
+        <label className="block text-xs font-medium text-gray-700 mb-1">Arrival</label>
+        <input name="arrival_time" type="datetime-local" value={form.arrival_time} onChange={onChange}
+          className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white" />
+      </div>
+      <div>
+        <label className="block text-xs font-medium text-gray-700 mb-1">Class</label>
+        <select name="seat_class" value={form.seat_class} onChange={onChange}
+          className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+          <option value="economy">Economy</option>
+          <option value="business">Business</option>
+          <option value="first">First</option>
+        </select>
+      </div>
+      <div>
+        <label className="block text-xs font-medium text-gray-700 mb-1">Baggage (kg)</label>
+        <input name="baggage_kg" type="number" value={form.baggage_kg} onChange={onChange}
+          className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white" />
+      </div>
+    </div>
+  )
+}
+
 export default function FlightDetailsSection({ bookingId, organizationId, flights }: Props) {
   const router   = useRouter()
   const supabase = createClient()
 
-  const [open,    setOpen]    = useState(flights.length > 0)
-  const [adding,  setAdding]  = useState(false)
-  const [loading, setLoading] = useState(false)
-  const [error,   setError]   = useState<string | null>(null)
-  const [form,    setForm]    = useState<Record<string, string>>(emptyFlight)
+  const [open,      setOpen]      = useState(flights.length > 0)
+  const [adding,     setAdding]    = useState(false)
+  const [editingId,  setEditingId] = useState<string | null>(null)
+  const [loading,    setLoading]   = useState(false)
+  const [error,      setError]     = useState<string | null>(null)
+  const [form,       setForm]      = useState<Record<string, string>>(emptyFlight)
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) {
     setForm(prev => ({ ...prev, [e.target.name]: e.target.value }))
+  }
+
+  function startEdit(f: FlightDetail) {
+    setAdding(false)
+    setForm(toFormValues(f))
+    setEditingId(f.id)
+    setOpen(true)
+  }
+
+  function cancelEdit() {
+    setEditingId(null)
+    setForm(emptyFlight)
+    setError(null)
+  }
+
+  function buildPayload() {
+    return {
+      trip_type:       form.trip_type,
+      airline:         form.airline        || null,
+      flight_number:   form.flight_number  || null,
+      pnr:             form.pnr            || null,
+      seat_no:         form.seat_no        || null,
+      departure_city:  form.departure_city || null,
+      arrival_city:    form.arrival_city   || null,
+      departure_time:  form.departure_time || null,
+      arrival_time:    form.arrival_time   || null,
+      terminal:        form.terminal       || null,
+      seat_class:      form.seat_class,
+      baggage_kg:      parseInt(form.baggage_kg || '23'),
+      notes:           form.notes          || null,
+    }
   }
 
   async function handleAdd(e: React.FormEvent) {
@@ -49,22 +187,29 @@ export default function FlightDetailsSection({ bookingId, organizationId, flight
     const { error } = await supabase.from('flight_details').insert({
       booking_id:      bookingId,
       organization_id: organizationId,
-      trip_type:       form.trip_type,
-      airline:         form.airline        || null,
-      flight_number:   form.flight_number  || null,
-      pnr:             form.pnr            || null,
-      departure_city:  form.departure_city || null,
-      arrival_city:    form.arrival_city   || null,
-      departure_time:  form.departure_time || null,
-      arrival_time:    form.arrival_time   || null,
-      terminal:        form.terminal       || null,
-      seat_class:      form.seat_class,
-      baggage_kg:      parseInt(form.baggage_kg || '23'),
-      notes:           form.notes          || null,
+      ...buildPayload(),
     })
 
     if (error) { setError(error.message); setLoading(false); return }
     setAdding(false)
+    setForm(emptyFlight)
+    setLoading(false)
+    router.refresh()
+  }
+
+  async function handleUpdate(e: React.FormEvent) {
+    e.preventDefault()
+    if (!editingId) return
+    setLoading(true)
+    setError(null)
+
+    const { error } = await supabase
+      .from('flight_details')
+      .update(buildPayload())
+      .eq('id', editingId)
+
+    if (error) { setError(error.message); setLoading(false); return }
+    setEditingId(null)
     setForm(emptyFlight)
     setLoading(false)
     router.refresh()
@@ -89,7 +234,7 @@ export default function FlightDetailsSection({ bookingId, organizationId, flight
           {open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
         </button>
         <button
-          onClick={() => { setAdding(true); setOpen(true) }}
+          onClick={() => { setEditingId(null); setForm(emptyFlight); setAdding(true); setOpen(true) }}
           className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-700"
         >
           <Plus size={14} /> Add flight
@@ -101,40 +246,79 @@ export default function FlightDetailsSection({ bookingId, organizationId, flight
 
           {/* Existing flights */}
           {flights.map(f => (
-            <div key={f.id} className="border border-gray-100 rounded-lg p-4 text-sm">
-              <div className="flex items-start justify-between mb-2">
-                <div className="flex items-center gap-2">
-                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                    f.trip_type === 'outbound'
-                      ? 'bg-blue-50 text-blue-700'
-                      : 'bg-purple-50 text-purple-700'
-                  }`}>
-                    {f.trip_type === 'outbound' ? '✈ Outbound' : '✈ Return'}
-                  </span>
-                  {f.airline && <span className="font-medium text-gray-900">{f.airline}</span>}
-                  {f.flight_number && <span className="text-gray-500">{f.flight_number}</span>}
+            editingId === f.id ? (
+              <form key={f.id} onSubmit={handleUpdate} className="border border-blue-100 rounded-lg p-4 bg-blue-50 space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-medium text-gray-700">Edit flight</p>
+                  <button type="button" onClick={cancelEdit} className="text-gray-400 hover:text-gray-600">
+                    <X size={15} />
+                  </button>
                 </div>
-                <button onClick={() => handleDelete(f.id)}
-                  className="text-gray-300 hover:text-red-500 transition">
-                  <Trash2 size={14} />
-                </button>
-              </div>
-              <div className="grid grid-cols-2 gap-2 text-xs text-gray-500">
-                {f.departure_city && f.arrival_city && (
-                  <div className="col-span-2 font-medium text-gray-700">
-                    {f.departure_city} → {f.arrival_city}
+
+                {error && (
+                  <div className="bg-red-50 text-red-700 px-3 py-2 rounded text-xs">{error}</div>
+                )}
+
+                <FlightFormFields form={form} onChange={handleChange} />
+
+                <div className="flex gap-2">
+                  <button type="submit" disabled={loading}
+                    className="bg-blue-600 text-white px-4 py-1.5 rounded-lg text-sm font-medium hover:bg-blue-700 transition disabled:opacity-50">
+                    {loading ? 'Saving...' : 'Save changes'}
+                  </button>
+                  <button type="button" onClick={cancelEdit}
+                    className="px-4 py-1.5 rounded-lg border border-gray-300 text-sm text-gray-600 hover:bg-gray-50 transition">
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <div key={f.id} className="border border-gray-100 rounded-lg p-4 text-sm">
+                <div className="flex items-start justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                      f.trip_type === 'outbound'
+                        ? 'bg-blue-50 text-blue-700'
+                        : 'bg-purple-50 text-purple-700'
+                    }`}>
+                      {f.trip_type === 'outbound' ? '✈ Outbound' : '✈ Return'}
+                    </span>
+                    {f.airline && <span className="font-medium text-gray-900">{f.airline}</span>}
+                    {f.flight_number && <span className="text-gray-500">{f.flight_number}</span>}
                   </div>
-                )}
-                {f.departure_time && (
-                  <div>Dep: {new Date(f.departure_time).toLocaleString('en-PK', { dateStyle: 'short', timeStyle: 'short' })}</div>
-                )}
-                {f.arrival_time && (
-                  <div>Arr: {new Date(f.arrival_time).toLocaleString('en-PK', { dateStyle: 'short', timeStyle: 'short' })}</div>
-                )}
-                {f.pnr && <div>PNR: <span className="font-mono font-medium text-gray-800">{f.pnr}</span></div>}
-                {f.seat_class && <div className="capitalize">{f.seat_class} • {f.baggage_kg}kg</div>}
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => startEdit(f)}
+                      className="text-gray-300 hover:text-blue-500 transition p-1">
+                      <Pencil size={14} />
+                    </button>
+                    <button onClick={() => handleDelete(f.id)}
+                      className="text-gray-300 hover:text-red-500 transition p-1">
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-xs text-gray-500">
+                  {f.departure_city && f.arrival_city && (
+                    <div className="col-span-2 font-medium text-gray-700">
+                      {f.departure_city} → {f.arrival_city}
+                    </div>
+                  )}
+                  {f.departure_time && (
+                    <div>Dep: {new Date(f.departure_time).toLocaleString('en-PK', { dateStyle: 'short', timeStyle: 'short' })}</div>
+                  )}
+                  {f.arrival_time && (
+                    <div>Arr: {new Date(f.arrival_time).toLocaleString('en-PK', { dateStyle: 'short', timeStyle: 'short' })}</div>
+                  )}
+                  {f.pnr
+                    ? <div>PNR: <span className="font-mono font-medium text-gray-800">{f.pnr}</span></div>
+                    : <div className="text-amber-600">PNR: not added — click edit</div>}
+                  {(f as any).seat_no
+                    ? <div>Seat: <span className="font-mono font-medium text-gray-800">{(f as any).seat_no}</span></div>
+                    : <div className="text-amber-600">Seat: not added — click edit</div>}
+                  {f.seat_class && <div className="capitalize">{f.seat_class} • {f.baggage_kg}kg</div>}
+                </div>
               </div>
-            </div>
+            )
           ))}
 
           {/* Add flight form */}
@@ -146,70 +330,7 @@ export default function FlightDetailsSection({ bookingId, organizationId, flight
                 <div className="bg-red-50 text-red-700 px-3 py-2 rounded text-xs">{error}</div>
               )}
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Type</label>
-                  <select name="trip_type" value={form.trip_type} onChange={handleChange}
-                    className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
-                    <option value="outbound">Outbound</option>
-                    <option value="return">Return</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Airline</label>
-                  <input name="airline" value={form.airline} onChange={handleChange}
-                    placeholder="e.g. PIA, Emirates"
-                    className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white" />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Flight no.</label>
-                  <input name="flight_number" value={form.flight_number} onChange={handleChange}
-                    placeholder="e.g. PK-301"
-                    className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white" />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">PNR</label>
-                  <input name="pnr" value={form.pnr} onChange={handleChange}
-                    placeholder="e.g. ABC123"
-                    className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white font-mono" />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">From</label>
-                  <input name="departure_city" value={form.departure_city} onChange={handleChange}
-                    placeholder="e.g. Karachi (KHI)"
-                    className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white" />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">To</label>
-                  <input name="arrival_city" value={form.arrival_city} onChange={handleChange}
-                    placeholder="e.g. Jeddah (JED)"
-                    className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white" />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Departure</label>
-                  <input name="departure_time" type="datetime-local" value={form.departure_time} onChange={handleChange}
-                    className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white" />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Arrival</label>
-                  <input name="arrival_time" type="datetime-local" value={form.arrival_time} onChange={handleChange}
-                    className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white" />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Class</label>
-                  <select name="seat_class" value={form.seat_class} onChange={handleChange}
-                    className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
-                    <option value="economy">Economy</option>
-                    <option value="business">Business</option>
-                    <option value="first">First</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Baggage (kg)</label>
-                  <input name="baggage_kg" type="number" value={form.baggage_kg} onChange={handleChange}
-                    className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white" />
-                </div>
-              </div>
+              <FlightFormFields form={form} onChange={handleChange} />
 
               <div className="flex gap-2">
                 <button type="submit" disabled={loading}

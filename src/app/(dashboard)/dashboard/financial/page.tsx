@@ -6,8 +6,13 @@ import {
   Building, FileText, BarChart2
 } from 'lucide-react'
 import PnlChart from '@/components/financial/PnlChart'
+// src/app/(dashboard)/dashboard/financial/page.tsx
+import { requirePermission } from '@/lib/requirePermission'
+
 
 export default async function FinancialPage() {
+    await requirePermission('financial')
+
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
 

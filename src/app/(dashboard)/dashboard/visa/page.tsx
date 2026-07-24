@@ -1,189 +1,177 @@
-import { createClient } from '@/lib/supabase/server'
-import Link from 'next/link'
-import { formatDate } from '@/lib/utils'
-import { ShieldCheck, Plus, AlertTriangle } from 'lucide-react'
-import VisaStatusBadge from '@/components/visa/VisaStatusBadge'
-import VisaSearch from '@/components/visa/VisaSearch'
-export default async function VisaPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ status?: string; q?: string }>
-}) {
-  const { status, q } = await searchParams
+import { createClient }  from '@/lib/supabase/server'
+import { formatDate }    from '@/lib/utils'
+import Link              from 'next/link'
+import { Plus, ShieldCheck, AlertCircle, Clock } from 'lucide-react'
+import { Button }        from '@/components/ui/button'
+import { Badge }         from '@/components/ui/badge'
+import { Card, CardContent, CardHeader } from '@/components/ui/card'
+import { Input }         from '@/components/ui/input'
+import { Search }        from 'lucide-react'
+import { Separator }     from '@/components/ui/separator'
+
+function VisaStatusBadge({ status }: { status: string }) {
+  const map: Record<string, string> = {
+    pending:   'bg-amber-50   text-amber-700   border-amber-200',
+    approved:  'bg-emerald-50 text-emerald-700 border-emerald-200',
+    rejected:  'bg-red-50     text-red-600     border-red-200',
+    submitted: 'bg-blue-50    text-blue-700    border-blue-200',
+    expired:   'bg-slate-100  text-slate-500   border-slate-200',
+  }
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-semibold border capitalize ${map[status] ?? 'bg-slate-100 text-slate-600 border-slate-200'}`}>
+      {status}
+    </span>
+  )
+}
+
+export default async function VisaPage() {
   const supabase = await createClient()
 
-  let query = supabase
-    .from('visa_applications')
-    .select('*, client:clients(full_name, phone, passport_number), booking:bookings(booking_ref)')
-    .order('created_at', { ascending: false })
+  const [{ data: visas }, { data: alerts }] = await Promise.all([
+    supabase
+      .from('visa_applications')
+      .select('*, client:clients(full_name, phone)')
+      .order('created_at', { ascending: false }),
+    supabase
+      .from('visa_alerts')
+      .select('*')
+      .order('days_until_expiry', { ascending: true })
+      .limit(5),
+  ])
 
-  if (status && status !== 'all') {
-    query = query.eq('status', status)
-  }
-
-  const { data: visas  } = await query
-  const { data: alerts } = await supabase
-    .from('visa_alerts')
-    .select('*')
-    .eq('organization_id',
-      (await supabase
-        .from('profiles')
-        .select('organization_id')
-        .eq('id', (await supabase.auth.getUser()).data.user!.id)
-        .single()
-      ).data?.organization_id
-    )
-
-  const filtered = visas?.filter(v => {
-    if (!q) return true
-    const s = q.toLowerCase()
-    return (
-      (v.client as any)?.full_name?.toLowerCase().includes(s) ||
-      v.destination?.toLowerCase().includes(s)               ||
-      v.visa_number?.toLowerCase().includes(s)               ||
-      (v.booking as any)?.booking_ref?.toLowerCase().includes(s)
-    )
-  })
-
-  const statusCounts = {
-    all:                  visas?.length ?? 0,
-    not_applied:          visas?.filter(v => v.status === 'not_applied').length          ?? 0,
-    documents_collecting: visas?.filter(v => v.status === 'documents_collecting').length ?? 0,
-    applied:              visas?.filter(v => v.status === 'applied').length              ?? 0,
-    processing:           visas?.filter(v => v.status === 'processing').length           ?? 0,
-    approved:             visas?.filter(v => v.status === 'approved').length             ?? 0,
-    rejected:             visas?.filter(v => v.status === 'rejected').length             ?? 0,
-  }
+  const total    = visas?.length ?? 0
+  const pending  = visas?.filter(v => v.status === 'pending').length  ?? 0
+  const approved = visas?.filter(v => v.status === 'approved').length ?? 0
+  const expiring = alerts?.length ?? 0
 
   return (
-    <div className="p-8">
+    <div className="p-6 max-w-[1400px] mx-auto">
+
+      {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Visa Tracker</h1>
-          <p className="text-gray-500 text-sm mt-1">
-            {filtered?.length ?? 0} visa applications
-          </p>
+          <h1 className="text-xl font-bold text-slate-900 tracking-tight">Visa Tracker</h1>
+          <p className="text-[13px] text-slate-500 mt-0.5">{total} applications</p>
         </div>
-        <Link href="/dashboard/visa/new"
-          className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition text-sm font-medium">
-          <Plus size={16} /> Add visa application
+        <Link href="/dashboard/visa/new">
+          <Button size="sm" className="h-8 text-[12px] bg-slate-900 hover:bg-slate-800 gap-1.5">
+            <Plus size={12} /> New Application
+          </Button>
         </Link>
+      </div>
+
+      {/* KPI row */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        {[
+          { label: 'Total',    value: total,    color: 'text-slate-900'   },
+          { label: 'Pending',  value: pending,  color: 'text-amber-600'   },
+          { label: 'Approved', value: approved, color: 'text-emerald-600' },
+          { label: 'Expiring', value: expiring, color: 'text-red-600'     },
+        ].map(k => (
+          <Card key={k.label} className="border-slate-100 shadow-none">
+            <CardContent className="p-4">
+              <p className="text-[12px] text-slate-500 font-medium mb-1">{k.label}</p>
+              <p className={`text-xl font-bold ${k.color} tracking-tight`}>{k.value}</p>
+            </CardContent>
+          </Card>
+        ))}
       </div>
 
       {/* Expiry alerts */}
       {alerts && alerts.length > 0 && (
-        <div className="bg-orange-50 border border-orange-200 rounded-xl p-4 mb-6">
-          <div className="flex items-center gap-2 mb-2">
-            <AlertTriangle size={16} className="text-orange-600" />
-            <p className="font-semibold text-orange-800">
-              {alerts.length} visa{alerts.length > 1 ? 's' : ''} expiring within 30 days
-            </p>
+        <div className="bg-red-50 border border-red-100 rounded-xl p-4 mb-5">
+          <div className="flex items-center gap-2 mb-2.5">
+            <AlertCircle size={14} className="text-red-500 shrink-0" />
+            <span className="text-[13px] font-semibold text-red-700">
+              {alerts.length} visa{alerts.length > 1 ? 's' : ''} expiring soon
+            </span>
           </div>
-          <div className="space-y-1">
-            {alerts.map((a: any) => (
-              <p key={a.id} className="text-sm text-orange-700">
-                • {a.client_name} — {a.destination} visa expires {formatDate(a.expiry_date)}
-              </p>
+          <div className="flex flex-wrap gap-2">
+            {(alerts as any[]).map((a: any) => (
+              <Link key={a.id} href={`/dashboard/visa/${a.id}`}>
+                <Badge variant="outline" className="text-[11px] border-red-200 text-red-600 bg-white hover:bg-red-50 cursor-pointer gap-1">
+                  <Clock size={9} />
+                  {a.client_name} · {a.days_until_expiry}d left
+                </Badge>
+              </Link>
             ))}
           </div>
         </div>
       )}
 
-      {/* Status filter pills */}
-      <div className="flex gap-2 flex-wrap mb-4">
-        {Object.entries(statusCounts).map(([s, count]) => (
-          <Link
-            key={s}
-            href={`/dashboard/visa?status=${s}`}
-            className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition capitalize ${
-              (status ?? 'all') === s
-                ? 'bg-blue-600 text-white border-blue-600'
-                : 'bg-white text-gray-600 border-gray-300 hover:border-blue-300'
-            }`}
-          >
-            {s.replace('_', ' ')} ({count})
-          </Link>
-        ))}
-      </div>
+      {/* Table */}
+      <Card className="border-slate-100 shadow-none">
+        <CardHeader className="px-5 py-3.5 border-b border-slate-100">
+          <div className="relative max-w-xs">
+            <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <Input placeholder="Search applications..." className="pl-8 h-8 text-[13px] border-slate-200 bg-slate-50 focus:bg-white" />
+          </div>
+        </CardHeader>
+        <CardContent className="p-0">
+          {(!visas || visas.length === 0) ? (
+            <div className="text-center py-16">
+              <div className="w-12 h-12 bg-slate-100 rounded-xl flex items-center justify-center mx-auto mb-3">
+                <ShieldCheck size={20} className="text-slate-400" />
+              </div>
+              <p className="text-[14px] font-medium text-slate-600 mb-1">No visa applications</p>
+              <p className="text-[13px] text-slate-400 mb-4">Create your first visa application</p>
+              <Link href="/dashboard/visa/new">
+                <Button size="sm" className="bg-slate-900 hover:bg-slate-800 text-[12px] gap-1.5">
+                  <Plus size={12} /> New Application
+                </Button>
+              </Link>
+            </div>
+          ) : (
+            <>
+              {/* Table header */}
+              <div className="grid grid-cols-12 gap-4 px-5 py-2.5 bg-slate-50 border-b border-slate-100">
+                <p className="col-span-3 text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Client</p>
+                <p className="col-span-2 text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Visa Type</p>
+                <p className="col-span-2 text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Country</p>
+                <p className="col-span-2 text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Applied</p>
+                <p className="col-span-1 text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Expiry</p>
+                <p className="col-span-2 text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Status</p>
+              </div>
 
-      {/* Search */}
-      <VisaSearch currentQ={q} />
-        
+              {visas.map((v: any, i: number) => {
+                const daysLeft = v.expiry_date
+                  ? Math.ceil((new Date(v.expiry_date).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+                  : null
 
-      {(!filtered || filtered.length === 0) && (
-        <div className="text-center py-20 bg-white rounded-xl border border-gray-100">
-          <ShieldCheck size={40} className="mx-auto text-gray-300 mb-3" />
-          <p className="text-gray-500 font-medium">No visa applications yet</p>
-          <Link href="/dashboard/visa/new"
-            className="mt-4 inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition text-sm">
-            <Plus size={15} /> Add visa application
-          </Link>
-        </div>
-      )}
-
-      {filtered && filtered.length > 0 && (
-        <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-gray-50 border-b border-gray-100">
-                <th className="text-left px-4 py-3 text-gray-500 font-medium">Client</th>
-                <th className="text-left px-4 py-3 text-gray-500 font-medium">Booking</th>
-                <th className="text-left px-4 py-3 text-gray-500 font-medium">Destination</th>
-                <th className="text-left px-4 py-3 text-gray-500 font-medium">Type</th>
-                <th className="text-left px-4 py-3 text-gray-500 font-medium">Status</th>
-                <th className="text-left px-4 py-3 text-gray-500 font-medium">Applied</th>
-                <th className="text-left px-4 py-3 text-gray-500 font-medium">Expiry</th>
-                <th className="text-left px-4 py-3 text-gray-500 font-medium"></th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-50">
-              {filtered.map((v: any) => (
-                <tr key={v.id} className="hover:bg-gray-50 transition">
-                  <td className="px-4 py-3">
-                    <p className="font-medium text-gray-900">{v.client?.full_name}</p>
-                    {v.client?.passport_number && (
-                      <p className="text-xs text-gray-400 font-mono">{v.client.passport_number}</p>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    <Link href={`/dashboard/bookings/${v.booking_id}`}
-                      className="font-mono text-blue-600 hover:underline text-xs">
-                      {v.booking?.booking_ref}
+                return (
+                  <div key={v.id}>
+                    <Link href={`/dashboard/visa/${v.id}`} className="grid grid-cols-12 gap-4 px-5 py-3 hover:bg-slate-50/70 transition-colors items-center group">
+                      <div className="col-span-3 flex items-center gap-2.5 min-w-0">
+                        <div className="w-7 h-7 bg-slate-100 rounded-lg flex items-center justify-center shrink-0 text-[11px] font-bold text-slate-600 group-hover:bg-slate-200 transition-colors">
+                          {v.client?.full_name?.charAt(0) ?? '?'}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-[13px] font-semibold text-slate-900 truncate">{v.client?.full_name ?? '—'}</p>
+                          {v.client?.phone && <p className="text-[11px] text-slate-400">{v.client.phone}</p>}
+                        </div>
+                      </div>
+                      <p className="col-span-2 text-[13px] text-slate-600 capitalize">{v.visa_type ?? '—'}</p>
+                      <p className="col-span-2 text-[13px] text-slate-600">{v.country ?? '—'}</p>
+                      <p className="col-span-2 text-[12px] text-slate-400">{formatDate(v.applied_date)}</p>
+                      <div className="col-span-1">
+                        {daysLeft !== null ? (
+                          <span className={`text-[12px] font-semibold ${daysLeft <= 30 ? 'text-red-600' : daysLeft <= 90 ? 'text-amber-600' : 'text-slate-500'}`}>
+                            {daysLeft <= 0 ? 'Expired' : `${daysLeft}d`}
+                          </span>
+                        ) : (
+                          <span className="text-[12px] text-slate-300">—</span>
+                        )}
+                      </div>
+                      <div className="col-span-2"><VisaStatusBadge status={v.status} /></div>
                     </Link>
-                  </td>
-                  <td className="px-4 py-3 text-gray-700">{v.destination}</td>
-                  <td className="px-4 py-3">
-                    <span className="capitalize text-gray-600">{v.visa_type}</span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <VisaStatusBadge status={v.status} />
-                  </td>
-                  <td className="px-4 py-3 text-gray-500 text-xs">
-                    {v.applied_date ? formatDate(v.applied_date) : '—'}
-                  </td>
-                  <td className="px-4 py-3 text-xs">
-                    {v.expiry_date ? (
-                      <span className={
-                        new Date(v.expiry_date) < new Date(Date.now() + 30*24*60*60*1000)
-                          ? 'text-orange-600 font-medium'
-                          : 'text-gray-500'
-                      }>
-                        {formatDate(v.expiry_date)}
-                      </span>
-                    ) : '—'}
-                  </td>
-                  <td className="px-4 py-3">
-                    <Link href={`/dashboard/visa/${v.id}`}
-                      className="text-blue-600 hover:underline text-xs">
-                      View
-                    </Link>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+                    {i < visas.length - 1 && <Separator className="mx-5 w-auto" />}
+                  </div>
+                )
+              })}
+            </>
+          )}
+        </CardContent>
+      </Card>
     </div>
   )
 }

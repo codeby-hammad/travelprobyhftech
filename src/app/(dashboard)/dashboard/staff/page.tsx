@@ -5,9 +5,12 @@ import Link                from 'next/link'
 import { Plus, UserCog }   from 'lucide-react'
 import StaffList           from '@/components/staff/StaffList'
 import DeleteStaffButton from './DeleteStaffButton'
+import { requirePermission } from '@/lib/requirePermission'
 
 
 export default async function StaffPage() {
+    await requirePermission('staff')
+
   const perms = await getUserPermissions()
   if (!can(perms, 'staff')) redirect('/dashboard')
 

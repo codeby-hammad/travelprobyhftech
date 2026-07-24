@@ -1,20 +1,43 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, Package as PackageIcon } from 'lucide-react'
 import type { Client, Package } from '@/types'
 
+const ROOM_TYPE_LABELS: Record<string, string> = {
+  sharing: 'Sharing',
+  quad:    'Quad',
+  triple:  'Triple',
+  double:  'Double',
+}
+
+function getPriceForRoomType(pkg: any, roomType: string): number {
+  switch (roomType) {
+    case 'quad':   return pkg.price_quad   ?? pkg.base_price
+    case 'triple': return pkg.price_triple ?? pkg.base_price
+    case 'double': return pkg.price_double ?? pkg.base_price
+    default:       return pkg.base_price
+  }
+}
+
 export default function NewBookingPage() {
-  const router   = useRouter()
-  const supabase = createClient()
+  const router       = useRouter()
+  const searchParams = useSearchParams()
+  const supabase      = createClient()
 
   const [clients,  setClients]  = useState<Client[]>([])
   const [packages, setPackages] = useState<Package[]>([])
   const [loading,  setLoading]  = useState(false)
   const [error,    setError]    = useState<string | null>(null)
+
+  // Room type carried over from the packages page's "Book Now" link —
+  // not a bookings table column, so we keep it as local state and fold it
+  // into notes on submit rather than trying to insert it directly.
+  const [roomType, setRoomType] = useState<string>(searchParams.get('room_type') ?? 'sharing')
+  const prefilledPackageId = searchParams.get('package_id')
 
   const [form, setForm] = useState({
     client_id:      '',
@@ -38,18 +61,50 @@ export default function NewBookingPage() {
       ])
       setClients(c ?? [])
       setPackages(p ?? [])
+
+      // If we arrived via a package's "Book Now" link, pre-fill everything
+      // now that we actually have the package data to pull the price from
+      if (prefilledPackageId) {
+        const pkg = (p ?? []).find((pkg: any) => pkg.id === prefilledPackageId)
+        if (pkg) {
+          const price = getPriceForRoomType(pkg, roomType)
+          setForm(prev => ({
+            ...prev,
+            package_id:   pkg.id,
+            total_amount: price != null ? String(price) : '',
+            currency:     pkg.currency,
+            travel_date:  (pkg as any).departure_date ?? '',
+            return_date:  (pkg as any).return_date    ?? '',
+          }))
+        }
+      }
     }
     load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // When a package is selected, auto-fill the price
+  const selectedPackage: any = packages.find(p => p.id === form.package_id)
+
+  // Recompute price whenever room type or passenger count changes, so the
+  // total stays correct if the agent adjusts either after landing here
+  useEffect(() => {
+    if (!selectedPackage) return
+    const price = getPriceForRoomType(selectedPackage, roomType)
+    if (price == null) return
+    const total = price * parseInt(form.num_passengers || '1')
+    setForm(prev => ({ ...prev, total_amount: String(total) }))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomType, form.num_passengers, selectedPackage?.id])
+
+  // When a package is selected manually, auto-fill the price
   function handlePackageChange(e: React.ChangeEvent<HTMLSelectElement>) {
     const pkgId = e.target.value
     setForm(prev => ({ ...prev, package_id: pkgId }))
     if (pkgId) {
-      const pkg = packages.find(p => p.id === pkgId)
+      const pkg: any = packages.find(p => p.id === pkgId)
       if (pkg) {
-        const total = pkg.base_price * parseInt(form.num_passengers || '1')
+        const price = getPriceForRoomType(pkg, roomType)
+        const total = (price ?? pkg.base_price) * parseInt(form.num_passengers || '1')
         setForm(prev => ({
           ...prev,
           package_id:   pkgId,
@@ -76,6 +131,13 @@ export default function NewBookingPage() {
       .eq('id', user!.id)
       .single()
 
+    // Fold the room type into notes, since bookings has no dedicated column
+    // for it — keeps the info visible on the booking without a schema change
+    const roomTypeNote = form.package_id
+      ? `Room type: ${ROOM_TYPE_LABELS[roomType] ?? roomType}`
+      : null
+    const combinedNotes = [roomTypeNote, form.notes || null].filter(Boolean).join('\n')
+
     const { error } = await supabase.from('bookings').insert({
       organization_id: profile!.organization_id,
       agent_id:        user!.id,
@@ -88,7 +150,7 @@ export default function NewBookingPage() {
       paid_amount:     parseFloat(form.paid_amount  || '0'),
       currency:        form.currency,
       status:          form.status,
-      notes:           form.notes || null,
+      notes:           combinedNotes || null,
     })
 
     if (error) { setError(error.message); setLoading(false); return }
@@ -107,6 +169,39 @@ export default function NewBookingPage() {
           <p className="text-gray-500 text-sm">Fill in the booking details below</p>
         </div>
       </div>
+
+      {/* Pre-filled package summary — only shows when arriving via a package's Book Now link */}
+      {selectedPackage && (
+        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 mb-5 flex items-start gap-3">
+          <div className="w-9 h-9 bg-emerald-100 rounded-lg flex items-center justify-center shrink-0">
+            <PackageIcon size={16} className="text-emerald-600" />
+          </div>
+          <div className="flex-1">
+            <p className="text-sm font-semibold text-emerald-900">
+              Booking from: {selectedPackage.name}
+            </p>
+            <p className="text-xs text-emerald-700 mt-0.5">
+              {ROOM_TYPE_LABELS[roomType] ?? roomType} room · {selectedPackage.currency} {getPriceForRoomType(selectedPackage, roomType)?.toLocaleString()} per person
+            </p>
+            <div className="flex gap-1.5 mt-2">
+              {Object.keys(ROOM_TYPE_LABELS).map(rt => (
+                <button
+                  key={rt}
+                  type="button"
+                  onClick={() => setRoomType(rt)}
+                  className={`text-[11px] font-semibold px-2.5 py-1 rounded-lg border transition ${
+                    roomType === rt
+                      ? 'bg-emerald-600 text-white border-emerald-600'
+                      : 'bg-white text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                  }`}
+                >
+                  {ROOM_TYPE_LABELS[rt]}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       <form onSubmit={handleSubmit} className="bg-white rounded-xl border border-gray-100 p-6 space-y-5">
         {error && (
@@ -208,6 +303,11 @@ export default function NewBookingPage() {
           <textarea name="notes" value={form.notes} onChange={handleChange} rows={3}
             placeholder="Any special requirements, visa notes, hotel preferences..."
             className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
+          {selectedPackage && (
+            <p className="text-xs text-gray-400 mt-1">
+              "{ROOM_TYPE_LABELS[roomType] ?? roomType} room" will be added to notes automatically.
+            </p>
+          )}
         </div>
 
         <div className="flex gap-3 pt-2">

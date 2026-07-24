@@ -1,35 +1,31 @@
-// Small helper functions used everywhere in the app
+import { clsx, type ClassValue } from "clsx"
+import { twMerge } from "tailwind-merge"
 
-import { type ClassValue, clsx } from 'clsx'
-import { twMerge } from 'tailwind-merge'
-
-// This combines Tailwind CSS classes safely (shadcn/ui needs this)
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
-// Format a number as currency: 5000 → "PKR 5,000"
-export function formatCurrency(amount: number, currency = 'PKR') {
-  return new Intl.NumberFormat('en-PK', {
-    style: 'currency',
-    currency,
-    minimumFractionDigits: 0,
-  }).format(amount)
+export function formatCurrency(
+  amount: number | string | null | undefined,
+  currency = 'PKR'
+): string {
+  if (amount === null || amount === undefined || amount === '') return '—'
+  const num = Number(amount)
+  if (isNaN(num)) return '—'
+  return `${currency} ${num.toLocaleString('en-PK')}`
 }
 
-// Format a date nicely: "2024-01-15" → "Jan 15, 2024"
-export function formatDate(dateString: string) {
-  return new Date(dateString).toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  })
-}
-
-// Make a URL-safe slug from a name: "Sunrise Travels" → "sunrise-travels"
-export function slugify(text: string) {
-  return text
-    .toLowerCase()
-    .replace(/\s+/g, '-')
-    .replace(/[^\w-]+/g, '')
+export function formatDate(
+  date: string | Date | null | undefined
+): string {
+  if (!date) return '—'
+  try {
+    return new Date(date).toLocaleDateString('en-PK', {
+      day:   '2-digit',
+      month: 'short',
+      year:  'numeric',
+    })
+  } catch {
+    return String(date)
+  }
 }

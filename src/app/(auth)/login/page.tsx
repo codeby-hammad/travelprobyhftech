@@ -4,15 +4,18 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
+import { useSearchParams } from 'next/navigation'
+
 
 export default function LoginPage() {
   const router = useRouter()
   const supabase = createClient()
-
   const [email, setEmail]       = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading]   = useState(false)
   const [error, setError]       = useState<string | null>(null)
+  const searchParams = useSearchParams()
+  const timedOut = searchParams.get('reason') === 'timeout'
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault()
@@ -57,6 +60,12 @@ export default function LoginPage() {
             </div>
           )}
 
+          {timedOut && (
+  <div className="bg-orange-50 border border-orange-200 text-orange-700 text-sm rounded-lg px-4 py-3 mb-4">
+    You were automatically logged out due to inactivity.
+  </div>
+)}
+
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Email address
@@ -98,6 +107,7 @@ export default function LoginPage() {
             {loading ? 'Signing in...' : 'Sign in'}
           </button>
         </form>
+
       </div>
     </div>
   )

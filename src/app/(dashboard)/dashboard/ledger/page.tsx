@@ -6,12 +6,18 @@ import {
   ArrowDownLeft, Users, TrendingUp
 } from 'lucide-react'
 import LedgerSearch from '@/components/ledger/LedgerSearch'
+import { requirePermission } from '@/lib/requirePermission'
+
 
 export default async function LedgerPage({
   searchParams,
 }: {
   searchParams: Promise<{ type?: string; q?: string }>
 }) {
+  {
+  await requirePermission('ledger')
+}
+  
   const { type, q } = await searchParams
   const supabase     = await createClient()
 

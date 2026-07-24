@@ -280,8 +280,8 @@ export default function LandingPage() {
       <section className="bg-blue-600 py-10 px-6">
         <div className="max-w-5xl mx-auto grid grid-cols-2 md:grid-cols-4 gap-8">
           {[
-            { value: '500+',    label: 'Travel agencies'      },
-            { value: '50,000+', label: 'Bookings managed'     },
+            { value: '50+',    label: 'Travel agencies'      },
+            { value: '10,000+', label: 'Bookings managed'     },
             { value: '99.9%',   label: 'Uptime guaranteed'    },
             { value: '24/7',    label: 'Pakistani support'    },
           ].map(stat => (
@@ -909,7 +909,7 @@ export default function LandingPage() {
             </a>
           </div>
           <p className="text-blue-300 text-sm mt-6">
-            ✈️ Pakistan ki 500+ travel agencies ne already TravelPro ko choose kiya hai
+            ✈️ Pakistan ki 50+ travel agencies ne already TravelPro ko choose kiya hai
           </p>
         </div>
       </section>

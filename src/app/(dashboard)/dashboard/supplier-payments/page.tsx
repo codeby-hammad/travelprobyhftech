@@ -2,6 +2,7 @@ import { createClient }  from '@/lib/supabase/server'
 import Link              from 'next/link'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { AlertTriangle, Plus, Building2, TrendingDown } from 'lucide-react'
+import { requirePermission } from '@/lib/requirePermission'
 
 const statusStyles: Record<string, string> = {
   unpaid:    'bg-red-50    text-red-700',
@@ -21,6 +22,8 @@ const typeIcons: Record<string, string> = {
 }
 
 export default async function SupplierPaymentsPage() {
+    await requirePermission('supplier_payments')
+
   const supabase = await createClient()
 
   const { data: { user } } = await supabase.auth.getUser()
