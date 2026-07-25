@@ -24,9 +24,9 @@ export default async function BalanceSheetPage() {
     return acc
   }, {} as Record<string, any[]>) ?? {}
 
-  const totalAssets      = (grouped['asset']     ?? []).reduce((s, r) => s + Number(r.closing_balance), 0)
-  const totalLiabilities = (grouped['liability'] ?? []).reduce((s, r) => s + Number(r.closing_balance), 0)
-  const totalEquity      = (grouped['equity']    ?? []).reduce((s, r) => s + Number(r.closing_balance), 0)
+  const totalAssets      = (grouped['asset']     ?? []).reduce((s: number, r: any) => s + Number(r.closing_balance), 0)
+const totalLiabilities = (grouped['liability'] ?? []).reduce((s: number, r: any) => s + Number(r.closing_balance), 0)
+const totalEquity      = (grouped['equity']    ?? []).reduce((s: number, r: any) => s + Number(r.closing_balance), 0)
   const netWorth         = totalAssets - totalLiabilities
 
   const sectionColors: Record<string, string> = {
@@ -66,7 +66,7 @@ export default async function BalanceSheetPage() {
       <div className="space-y-5">
         {(['asset', 'liability', 'equity'] as const).map(type => {
           const items    = grouped[type] ?? []
-          const total    = items.reduce((s, r) => s + Number(r.closing_balance), 0)
+          const total    = items.reduce((s: number, r: any) => s + Number(r.closing_balance), 0)
           if (items.length === 0) return null
 
           return (

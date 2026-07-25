@@ -42,17 +42,22 @@ export default function PnlChart({ data, type = 'pnl' }: Props) {
           tickLine={false}
           tickFormatter={fmt}
         />
-        <Tooltip
-          formatter={(value: number, name: string) => [
-            new Intl.NumberFormat('en-PK', {
-              style:                 'currency',
-              currency:              'PKR',
-              minimumFractionDigits: 0,
-            }).format(value),
-            name === 'income'   ? (type === 'cash' ? 'Cash in'  : 'Income')   :
-            name === 'expenses' ? (type === 'cash' ? 'Cash out' : 'Expenses') :
-                                   'Net profit'
-          ]}
+       <Tooltip
+          formatter={(value, name) => {
+            const numValue = typeof value === 'number' ? value : Number(value ?? 0)
+            const label =
+              name === 'income'   ? (type === 'cash' ? 'Cash in'  : 'Income')   :
+              name === 'expenses' ? (type === 'cash' ? 'Cash out' : 'Expenses') :
+                                     'Net profit'
+            return [
+              new Intl.NumberFormat('en-PK', {
+                style:                 'currency',
+                currency:              'PKR',
+                minimumFractionDigits: 0,
+              }).format(numValue),
+              label,
+            ]
+          }}
           contentStyle={{
             borderRadius: '8px',
             border:       '1px solid #e5e7eb',

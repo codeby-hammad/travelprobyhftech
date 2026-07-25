@@ -1,13 +1,12 @@
 'use client'
 
-import { useState } from 'react'
+import { Suspense, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { useSearchParams } from 'next/navigation'
 
-
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter()
   const supabase = createClient()
   const [email, setEmail]       = useState('')
@@ -61,10 +60,10 @@ export default function LoginPage() {
           )}
 
           {timedOut && (
-  <div className="bg-orange-50 border border-orange-200 text-orange-700 text-sm rounded-lg px-4 py-3 mb-4">
-    You were automatically logged out due to inactivity.
-  </div>
-)}
+            <div className="bg-orange-50 border border-orange-200 text-orange-700 text-sm rounded-lg px-4 py-3 mb-4">
+              You were automatically logged out due to inactivity.
+            </div>
+          )}
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -94,10 +93,10 @@ export default function LoginPage() {
             />
           </div>
           <div className="text-right">
-  <Link href="/forgot-password" className="text-xs text-blue-600 hover:underline">
-    Forgot password?
-  </Link>
-</div>
+            <Link href="/forgot-password" className="text-xs text-blue-600 hover:underline">
+              Forgot password?
+            </Link>
+          </div>
 
           <button
             type="submit"
@@ -110,5 +109,17 @@ export default function LoginPage() {
 
       </div>
     </div>
+  )
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <p className="text-sm text-gray-400">Loading...</p>
+      </div>
+    }>
+      <LoginForm />
+    </Suspense>
   )
 }

@@ -37,10 +37,13 @@ export default function RevenueChart({ data }: Props) {
           tickFormatter={v => v >= 1000 ? `${(v/1000).toFixed(0)}k` : v}
         />
         <Tooltip
-          formatter={(value: number) => [
-            new Intl.NumberFormat('en-PK', { style: 'currency', currency: 'PKR', minimumFractionDigits: 0 }).format(value),
-            'Revenue'
-          ]}
+          formatter={(value) => {
+            const numValue = typeof value === 'number' ? value : Number(value ?? 0)
+            return [
+              new Intl.NumberFormat('en-PK', { style: 'currency', currency: 'PKR', minimumFractionDigits: 0 }).format(numValue),
+              'Revenue',
+            ]
+          }}
           contentStyle={{
             borderRadius: '8px',
             border: '1px solid #e5e7eb',

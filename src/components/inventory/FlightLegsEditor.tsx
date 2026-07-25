@@ -33,7 +33,7 @@ function formatLayover(minutes: number): string {
 
 type Props = {
   legs:           LegInput[]
-  setLegs:        (legs: LegInput[]) => void
+  setLegs:        React.Dispatch<React.SetStateAction<LegInput[]>>
   defaultAirline?: string
   routeFrom?:     string
   routeTo?:       string

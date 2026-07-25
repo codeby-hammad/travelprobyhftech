@@ -338,7 +338,7 @@ export type BookingProfitSummary = {
 export type SeatStatus     = 'available' | 'reserved' | 'sold' | 'returned' | 'expired'
 export type SoldToType     = 'customer'  | 'sub_agent' | 'agency' | 'own_booking'
 export type BatchStatus    = 'active'    | 'expired'   | 'sold_out' | 'cancelled'
-export type PaymentStatus  = 'pending'   | 'received'  | 'overdue'
+export type TicketPaymentStatus  = 'pending'   | 'received'  | 'overdue'
 
 export type TicketBatch = {
   id:              string
@@ -383,7 +383,7 @@ export type TicketSeat = {
   sold_price:      number | null
   sold_date:       string | null
   payment_method:  string | null
-  payment_status:  PaymentStatus
+  payment_status:  TicketPaymentStatus
   notes:           string | null
   created_by:      string | null
   created_at:      string
@@ -504,7 +504,7 @@ export type TicketPassenger = {
   baggage_kg:      number
   group_sale_id:   string | null
   client_id:       string | null
-  payment_status:  PaymentStatus
+  payment_status:  TicketPaymentStatus
   notes:           string | null
   created_by:      string | null
   created_at:      string
