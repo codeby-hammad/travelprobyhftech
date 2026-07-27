@@ -38,6 +38,7 @@ const navGroups: NavGroup[] = [
     heading: 'Bookings',
     links: [
       { href: '/dashboard/inquiries',   label: 'Inquiries 🔔',  icon: Inbox,         module: 'bookings' },
+      { href: '/dashboard/umrah-inquiries', label: 'Umrah Queries', icon: Inbox,     module: 'bookings' },
       { href: '/dashboard/bookings',    label: 'Bookings',     icon: Calendar,  module: 'bookings' },
       { href: '/dashboard/quotations',  label: 'Quotations',   icon: FileSignature, module: 'bookings' },
       { href: '/dashboard/groups',      label: 'Groups',       icon: UsersRound, module: 'groups' },

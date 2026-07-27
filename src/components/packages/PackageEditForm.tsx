@@ -3,7 +3,7 @@
 import { useState }     from 'react'
 import { useRouter }    from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import { Loader2, Save } from 'lucide-react'
+import { Loader2, Save, Upload, X } from 'lucide-react'
 import AirlineLogo from '@/components/shared/AirlineLogo'
 import HotelPicker from '@/components/hotels/HotelPicker'
 
@@ -12,6 +12,59 @@ type Props = { pkg: any }
 export default function PackageEditForm({ pkg }: Props) {
   const supabase = createClient()
   const router   = useRouter()
+
+  // Package hero image — same upload pattern as the agency logo in
+  // OrganizationForm.tsx (select -> preview -> upload on submit)
+  const [imageUrl, setImageUrl]         = useState<string | null>(pkg.image_url ?? null)
+  const [imageFile, setImageFile]       = useState<File | null>(null)
+  const [imagePreview, setImagePreview] = useState<string | null>(null)
+  const [uploadingImage, setUploadingImage] = useState(false)
+
+  function handleImageSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    if (!file.type.startsWith('image/')) {
+      setError('Package image must be an image file.')
+      return
+    }
+    if (file.size > 4 * 1024 * 1024) {
+      setError('Package image must be under 4MB.')
+      return
+    }
+
+    setError(null)
+    setImageFile(file)
+    setImagePreview(URL.createObjectURL(file))
+  }
+
+  function clearImageSelection() {
+    setImageFile(null)
+    setImagePreview(null)
+  }
+
+  async function uploadImageIfNeeded(): Promise<string | null> {
+    if (!imageFile) return imageUrl
+
+    setUploadingImage(true)
+    try {
+      const ext  = imageFile.name.split('.').pop()
+      // Cache-bust with a timestamp, same reasoning as the logo upload —
+      // otherwise the old image can keep showing at the same URL after upsert
+      const path = `${pkg.organization_id}/${pkg.id}/image-${Date.now()}.${ext}`
+
+      const { error: uploadError } = await supabase.storage
+        .from('package-images')
+        .upload(path, imageFile, { upsert: true })
+
+      if (uploadError) throw uploadError
+
+      const { data } = supabase.storage.from('package-images').getPublicUrl(path)
+      return data.publicUrl
+    } finally {
+      setUploadingImage(false)
+    }
+  }
 
   const [form, setForm] = useState({
     name:               pkg.name               ?? '',
@@ -81,9 +134,19 @@ export default function PackageEditForm({ pkg }: Props) {
     setSaving(true)
     setError(null)
 
+    let finalImageUrl: string | null
+    try {
+      finalImageUrl = await uploadImageIfNeeded()
+    } catch (err: any) {
+      setError(err.message ?? 'Image upload failed.')
+      setSaving(false)
+      return
+    }
+
     const { error: updateError } = await supabase
       .from('packages')
       .update({
+        image_url:          finalImageUrl,
         name:               form.name,
         destination:        form.destination        || null,
         departure_city:     form.departure_city     || null,
@@ -139,6 +202,10 @@ export default function PackageEditForm({ pkg }: Props) {
       return
     }
 
+    setImageUrl(finalImageUrl)
+    setImageFile(null)
+    setImagePreview(null)
+
     router.push('/dashboard/packages')
     router.refresh()
   }
@@ -154,6 +221,39 @@ export default function PackageEditForm({ pkg }: Props) {
       {/* Basic Info */}
       <div className="bg-white rounded-xl border border-gray-100 p-5 space-y-4">
         <h3 className="text-sm font-semibold text-gray-900">Basic Info</h3>
+
+        {/* Package image */}
+        <div>
+          <label className={labelClass}>Package image</label>
+          <div className="flex items-center gap-4">
+            <div className="w-28 h-20 rounded-lg border border-gray-200 bg-gray-50 flex items-center justify-center overflow-hidden shrink-0">
+              {(imagePreview ?? imageUrl) ? (
+                <img src={(imagePreview ?? imageUrl) as string} alt="Package" className="w-full h-full object-cover" />
+              ) : (
+                <span className="text-[10px] text-gray-300 text-center px-2">No image yet</span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="flex items-center gap-1.5 text-xs font-medium text-gray-700 border border-gray-300 rounded-lg px-3 py-2 cursor-pointer hover:bg-gray-50 transition">
+                <Upload size={13} />
+                {imageUrl || imagePreview ? 'Change image' : 'Upload image'}
+                <input type="file" accept="image/*" onChange={handleImageSelect} className="hidden" />
+              </label>
+              {imagePreview && (
+                <button
+                  type="button"
+                  onClick={clearImageSelection}
+                  className="text-xs text-gray-400 hover:text-gray-600 flex items-center gap-1"
+                >
+                  <X size={13} /> Cancel
+                </button>
+              )}
+            </div>
+          </div>
+          <p className="text-xs text-gray-400 mt-1.5">
+            Used as the package's card image on your public website. Landscape photos work best (e.g. 800×450).
+          </p>
+        </div>
 
         <div>
           <label className={labelClass}>Package Name *</label>
@@ -521,11 +621,11 @@ export default function PackageEditForm({ pkg }: Props) {
         </button>
         <button
           type="submit"
-          disabled={saving}
+          disabled={saving || uploadingImage}
           className="flex-1 flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl text-sm font-medium disabled:opacity-50 transition"
         >
-          {saving ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
-          {saving ? 'Saving...' : 'Save Changes'}
+          {(saving || uploadingImage) ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
+          {uploadingImage ? 'Uploading image...' : saving ? 'Saving...' : 'Save Changes'}
         </button>
       </div>
     </form>

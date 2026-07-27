@@ -18,6 +18,7 @@ const EXCLUDE_FIELDS = new Set([
   'makkah_hotel_distance', 'madinah_hotel_distance',
   'makkah_nights', 'madinah_nights',
   'base_price', 'price_quad', 'price_triple', 'price_double',
+  'image_url',
 ])
 
 export default function DuplicatePackageButton({ pkg, label }: { pkg: any; label?: string }) {
@@ -38,8 +39,9 @@ export default function DuplicatePackageButton({ pkg, label }: { pkg: any; label
       .insert({
         ...copy,
         name: `${pkg.name} (Copy)`,
-        // Hotel + pricing intentionally blank — this is what the user fills
-        // in next to create the new variant under the same flight
+        // Hotel + pricing + image intentionally blank — this is what the
+        // user fills in next to create the new variant under the same flight
+        image_url: null,
         makkah_hotel: null,
         madinah_hotel: null,
         makkah_hotel_distance: null,
