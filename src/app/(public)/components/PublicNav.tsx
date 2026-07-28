@@ -116,15 +116,7 @@ export default function PublicNav({
           >
             Book Now
           </Link>
-          <a
-            href="https://wa.me/923001234567"
-            target="_blank"
-            rel="noopener noreferrer"
-            className={waClasses}
-          >
-            <span>💬</span>
-            <span>WhatsApp</span>
-          </a>
+          
 
           {/* Account area — Login/Sign up, or avatar + dropdown once logged in */}
           {showAccountUI && (
