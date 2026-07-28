@@ -39,9 +39,19 @@ export default function CustomerAuthModal({
       if (mode === 'signup') {
         const { data, error: signUpError } = await supabase.auth.signUp({ email, password })
         if (signUpError) throw signUpError
-        if (!data.user) throw new Error('Check your inbox to confirm your email, then log in.')
 
-        const customer = await ensureCustomerRow(supabase, data.user.id, organizationId, { fullName, email })
+        if (!data.session) {
+          // Email confirmation is required on this project, so there's no
+          // active session yet — inserting into `customers` here would be
+          // rejected by RLS since auth.uid() is null until they confirm.
+          // Their customer row gets created automatically on first login
+          // instead, since the login branch below also calls ensureCustomerRow.
+          setError('Check your inbox to confirm your email, then log in to continue.')
+          setLoading(false)
+          return
+        }
+
+        const customer = await ensureCustomerRow(supabase, data.user!.id, organizationId, { fullName, email })
         onAuthenticated(customer)
       } else {
         const { data, error: loginError } = await supabase.auth.signInWithPassword({ email, password })
