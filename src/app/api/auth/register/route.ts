@@ -49,7 +49,7 @@ export async function POST(request: NextRequest) {
 
     // Step 2 — Seed default roles for this org
     const { error: rolesError } = await admin.rpc('create_default_roles', {
-      org_id: org.id,
+      p_org_id: org.id,
     })
     if (rolesError) {
       console.error('Default roles creation failed:', rolesError)
