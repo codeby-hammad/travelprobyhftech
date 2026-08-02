@@ -2,10 +2,11 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import {
   Receipt, Plus, Trash2, ChevronDown,
-  ChevronUp, CheckCircle, Clock
+  ChevronUp, CheckCircle, Clock, FileText
 } from 'lucide-react'
 import { formatCurrency } from '@/lib/utils'
 import type { BookingExpense } from '@/types'
@@ -42,6 +43,25 @@ const categoryToAccountCode: Record<string, string> = {
   insurance: '5006',
   food:      '5006',
   other:     '5006',
+}
+
+// booking_expenses has a 'food' category that supplier_invoices' service_type
+// doesn't — everything else maps 1:1
+const categoryToServiceType: Record<string, string> = {
+  flight:    'flight',
+  hotel:     'hotel',
+  visa:      'visa',
+  transport: 'transport',
+  guide:     'guide',
+  insurance: 'insurance',
+  food:      'other',
+  other:     'other',
+}
+
+function generateInvoiceNumber(bookingId: string): string {
+  const shortBooking = bookingId.slice(0, 6).toUpperCase()
+  const stamp = Date.now().toString().slice(-6)
+  return `EXP-${shortBooking}-${stamp}`
 }
 
 const emptyForm = {
@@ -244,17 +264,51 @@ export default function ExpenseSection({
 
     if (error) { setError(error.message); setLoading(false); return }
 
-    const journalEntryId = await postExpenseToLedger({
-      description: form.description,
-      amount,
-      category:    form.category,
-      isPaid,
-      paidVia:     form.paid_via,
-      entryDate,
-    })
+    if (form.supplier_id) {
+      // Supplier attached — create the matching supplier invoice instead of
+      // posting to the ledger directly. The existing
+      // auto_ledger_on_supplier_invoice trigger handles GL posting from
+      // here, and Supplier Payments becomes where this gets tracked/paid —
+      // staff never have to re-type the same cost in two places.
+      const { data: invoice, error: invError } = await supabase
+        .from('supplier_invoices')
+        .insert({
+          organization_id: organizationId,
+          supplier_id:     form.supplier_id,
+          booking_id:      bookingId,
+          invoice_number:  generateInvoiceNumber(bookingId),
+          invoice_date:    entryDate,
+          service_type:    categoryToServiceType[form.category] ?? 'other',
+          description:     form.description,
+          amount,
+          currency,
+          notes:           form.notes || null,
+          created_by:      user!.id,
+        })
+        .select('id')
+        .single()
 
-    if (journalEntryId && inserted) {
-      await supabase.from('booking_expenses').update({ journal_entry_id: journalEntryId }).eq('id', inserted.id)
+      if (!invError && invoice && inserted) {
+        await supabase.from('booking_expenses').update({ supplier_invoice_id: invoice.id }).eq('id', inserted.id)
+      } else if (invError) {
+        // The expense itself is already saved — surface the invoice failure
+        // as a warning rather than losing the user's entry
+        setError(`Expense saved, but the supplier invoice couldn't be created: ${invError.message}`)
+      }
+    } else {
+      // No supplier — nothing else tracks this cost, so post it directly
+      const journalEntryId = await postExpenseToLedger({
+        description: form.description,
+        amount,
+        category:    form.category,
+        isPaid,
+        paidVia:     form.paid_via,
+        entryDate,
+      })
+
+      if (journalEntryId && inserted) {
+        await supabase.from('booking_expenses').update({ journal_entry_id: journalEntryId }).eq('id', inserted.id)
+      }
     }
 
     setForm(emptyForm)
@@ -264,6 +318,10 @@ export default function ExpenseSection({
   }
 
   async function togglePaid(expense: BookingExpense) {
+    // Supplier-linked expenses no longer have their own paid/unpaid state —
+    // that lives on the supplier invoice (and its payments) instead
+    if (expense.supplier_invoice_id) return
+
     const nowPaid = !expense.is_paid
     const paidDate = nowPaid ? new Date().toISOString().split('T')[0] : null
 
@@ -272,7 +330,6 @@ export default function ExpenseSection({
       .update({ is_paid: nowPaid, paid_date: paidDate })
       .eq('id', expense.id)
 
-    // Re-post to the ledger with the new offset account (Cash <-> Payable)
     await postExpenseToLedger({
       description: expense.description,
       amount:      Number(expense.amount),
@@ -287,9 +344,14 @@ export default function ExpenseSection({
   }
 
   async function handleDelete(id: string) {
-    if (!confirm('Remove this expense?')) return
-
     const expense = expenses.find(e => e.id === id)
+
+    const confirmMsg = expense?.supplier_invoice_id
+      ? 'This removes the expense from this booking, but the supplier invoice already created for it will stay in Supplier Payments — manage/void it from there if needed. Continue?'
+      : 'Remove this expense?'
+
+    if (!confirm(confirmMsg)) return
+
     if (expense?.journal_entry_id) {
       await supabase.from('ledger_entries').delete().eq('journal_entry_id', expense.journal_entry_id)
       await supabase.from('journal_entries').delete().eq('id', expense.journal_entry_id)
@@ -359,19 +421,28 @@ export default function ExpenseSection({
                   <p className="text-sm font-semibold text-gray-900">
                     {formatCurrency(exp.amount, exp.currency)}
                   </p>
-                  <button
-                    onClick={() => togglePaid(exp)}
-                    className={`text-xs flex items-center gap-1 mt-0.5 transition ${
-                      exp.is_paid
-                        ? 'text-green-600 hover:text-green-700'
-                        : 'text-orange-500 hover:text-orange-600'
-                    }`}
-                  >
-                    {exp.is_paid
-                      ? <><CheckCircle size={10} /> Paid</>
-                      : <><Clock size={10} /> Unpaid</>
-                    }
-                  </button>
+                  {exp.supplier_invoice_id ? (
+                    <Link
+                      href={`/dashboard/supplier-payments/invoices/${exp.supplier_invoice_id}`}
+                      className="text-xs flex items-center gap-1 mt-0.5 text-blue-600 hover:text-blue-700 transition"
+                    >
+                      <FileText size={10} /> View Invoice
+                    </Link>
+                  ) : (
+                    <button
+                      onClick={() => togglePaid(exp)}
+                      className={`text-xs flex items-center gap-1 mt-0.5 transition ${
+                        exp.is_paid
+                          ? 'text-green-600 hover:text-green-700'
+                          : 'text-orange-500 hover:text-orange-600'
+                      }`}
+                    >
+                      {exp.is_paid
+                        ? <><CheckCircle size={10} /> Paid</>
+                        : <><Clock size={10} /> Unpaid</>
+                      }
+                    </button>
+                  )}
                 </div>
                 <button
                   onClick={() => handleDelete(exp.id)}
