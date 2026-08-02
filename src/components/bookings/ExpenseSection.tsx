@@ -29,6 +29,21 @@ const categoryIcons: Record<string, string> = {
   other:     '📦',
 }
 
+// Maps each expense category to the matching chart-of-accounts code seeded
+// for every org. Categories without a dedicated account (transport, guide,
+// insurance, food) fall back to Miscellaneous (5006) — add dedicated
+// accounts later if any of these need their own line on the P&L.
+const categoryToAccountCode: Record<string, string> = {
+  flight:    '5001',
+  hotel:     '5002',
+  visa:      '5003',
+  transport: '5006',
+  guide:     '5006',
+  insurance: '5006',
+  food:      '5006',
+  other:     '5006',
+}
+
 const emptyForm = {
   category:     'flight',
   description:  '',
@@ -36,6 +51,7 @@ const emptyForm = {
   supplier_id:  '',
   is_paid:      'false',
   paid_date:    '',
+  paid_via:     'cash',
   reference_no: '',
   notes:        '',
 }
@@ -82,6 +98,121 @@ export default function ExpenseSection({
     })
   }
 
+  // Finds this org's copy of a chart-of-accounts row by its code (every org
+  // gets its own seeded set of accounts, sharing the same codes)
+  async function getAccountId(code: string): Promise<string | null> {
+    const { data } = await supabase
+      .from('accounts')
+      .select('id')
+      .eq('organization_id', organizationId)
+      .eq('code', code)
+      .maybeSingle()
+    return data?.id ?? null
+  }
+
+  // Posts (or re-posts) the double-entry journal entry for one expense:
+  // debit the category's expense account, credit Cash/Bank if already paid,
+  // or Accounts Payable (2001) if it's still owed. This is what actually
+  // makes booking expenses show up in the Financial Reports page — without
+  // it, costs only ever lived in booking_expenses and never reached the GL.
+  async function postExpenseToLedger(params: {
+    description: string
+    amount: number
+    category: string
+    isPaid: boolean
+    paidVia: string
+    entryDate: string
+    existingJournalEntryId?: string | null
+  }): Promise<string | null> {
+    const { data: { user } } = await supabase.auth.getUser()
+
+    const expenseAccountId = await getAccountId(categoryToAccountCode[params.category] ?? '5006')
+    const offsetAccountId  = await getAccountId(
+      params.isPaid ? (params.paidVia === 'bank' ? '1002' : '1001') : '2001'
+    )
+
+    // If either account is missing (e.g. this org's chart of accounts
+    // wasn't fully seeded), skip GL posting rather than break the expense
+    // form itself — the cost still gets tracked on the booking either way
+    if (!expenseAccountId || !offsetAccountId) return null
+
+    // Re-posting (paid status changed) — clear out the old entries first
+    if (params.existingJournalEntryId) {
+      await supabase.from('ledger_entries').delete().eq('journal_entry_id', params.existingJournalEntryId)
+      await supabase
+        .from('journal_entries')
+        .update({
+          entry_date:   params.entryDate,
+          description:  params.description,
+          total_amount: params.amount,
+        })
+        .eq('id', params.existingJournalEntryId)
+
+      await supabase.from('ledger_entries').insert([
+        {
+          organization_id:  organizationId,
+          journal_entry_id: params.existingJournalEntryId,
+          account_id:       expenseAccountId,
+          entry_type:       'debit',
+          amount:           params.amount,
+          currency,
+          description:      params.description,
+        },
+        {
+          organization_id:  organizationId,
+          journal_entry_id: params.existingJournalEntryId,
+          account_id:       offsetAccountId,
+          entry_type:       'credit',
+          amount:           params.amount,
+          currency,
+          description:      params.description,
+        },
+      ])
+      return params.existingJournalEntryId
+    }
+
+    // First time posting this expense
+    const { data: je, error: jeError } = await supabase
+      .from('journal_entries')
+      .insert({
+        organization_id: organizationId,
+        entry_date:      params.entryDate,
+        description:     params.description,
+        reference_type:  'expense',
+        reference_id:    bookingId,
+        total_amount:    params.amount,
+        currency,
+        created_by:      user!.id,
+      })
+      .select('id')
+      .single()
+
+    if (jeError || !je) return null
+
+    await supabase.from('ledger_entries').insert([
+      {
+        organization_id:  organizationId,
+        journal_entry_id: je.id,
+        account_id:       expenseAccountId,
+        entry_type:       'debit',
+        amount:           params.amount,
+        currency,
+        description:      params.description,
+      },
+      {
+        organization_id:  organizationId,
+        journal_entry_id: je.id,
+        account_id:       offsetAccountId,
+        entry_type:       'credit',
+        amount:           params.amount,
+        currency,
+        description:      params.description,
+      },
+    ])
+
+    return je.id
+  }
+
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault()
     if (!form.description || !form.amount) {
@@ -92,23 +223,39 @@ export default function ExpenseSection({
     setError(null)
 
     const { data: { user } } = await supabase.auth.getUser()
+    const amount   = parseFloat(form.amount)
+    const isPaid   = form.is_paid === 'true'
+    const entryDate = form.paid_date || new Date().toISOString().split('T')[0]
 
-    const { error } = await supabase.from('booking_expenses').insert({
+    const { data: inserted, error } = await supabase.from('booking_expenses').insert({
       booking_id:      bookingId,
       organization_id: organizationId,
       category:        form.category,
       description:     form.description,
-      amount:          parseFloat(form.amount),
+      amount,
       currency,
       supplier_id:     form.supplier_id || null,
-      is_paid:         form.is_paid === 'true',
+      is_paid:         isPaid,
       paid_date:       form.paid_date    || null,
       reference_no:    form.reference_no || null,
       notes:           form.notes        || null,
       created_by:      user!.id,
-    })
+    }).select('id').single()
 
     if (error) { setError(error.message); setLoading(false); return }
+
+    const journalEntryId = await postExpenseToLedger({
+      description: form.description,
+      amount,
+      category:    form.category,
+      isPaid,
+      paidVia:     form.paid_via,
+      entryDate,
+    })
+
+    if (journalEntryId && inserted) {
+      await supabase.from('booking_expenses').update({ journal_entry_id: journalEntryId }).eq('id', inserted.id)
+    }
 
     setForm(emptyForm)
     setAdding(false)
@@ -117,18 +264,37 @@ export default function ExpenseSection({
   }
 
   async function togglePaid(expense: BookingExpense) {
+    const nowPaid = !expense.is_paid
+    const paidDate = nowPaid ? new Date().toISOString().split('T')[0] : null
+
     await supabase
       .from('booking_expenses')
-      .update({
-        is_paid:   !expense.is_paid,
-        paid_date: !expense.is_paid ? new Date().toISOString().split('T')[0] : null,
-      })
+      .update({ is_paid: nowPaid, paid_date: paidDate })
       .eq('id', expense.id)
+
+    // Re-post to the ledger with the new offset account (Cash <-> Payable)
+    await postExpenseToLedger({
+      description: expense.description,
+      amount:      Number(expense.amount),
+      category:    expense.category,
+      isPaid:      nowPaid,
+      paidVia:     'cash', // toggled from the list view, not the form — defaults to cash
+      entryDate:   paidDate ?? new Date().toISOString().split('T')[0],
+      existingJournalEntryId: expense.journal_entry_id,
+    })
+
     router.refresh()
   }
 
   async function handleDelete(id: string) {
     if (!confirm('Remove this expense?')) return
+
+    const expense = expenses.find(e => e.id === id)
+    if (expense?.journal_entry_id) {
+      await supabase.from('ledger_entries').delete().eq('journal_entry_id', expense.journal_entry_id)
+      await supabase.from('journal_entries').delete().eq('id', expense.journal_entry_id)
+    }
+
     await supabase.from('booking_expenses').delete().eq('id', id)
     router.refresh()
   }
@@ -351,6 +517,23 @@ export default function ExpenseSection({
                       onChange={handleChange}
                       className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 bg-white"
                     />
+                  </div>
+                )}
+
+                {form.is_paid === 'true' && (
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">
+                      Paid via
+                    </label>
+                    <select
+                      name="paid_via"
+                      value={form.paid_via}
+                      onChange={handleChange}
+                      className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 bg-white"
+                    >
+                      <option value="cash">💵 Cash</option>
+                      <option value="bank">🏦 Bank</option>
+                    </select>
                   </div>
                 )}
 

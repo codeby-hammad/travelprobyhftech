@@ -314,6 +314,7 @@ export type BookingExpense = {
   currency:        string
   is_paid:         boolean
   paid_date:       string | null
+  journal_entry_id: string | null
   reference_no:    string | null
   notes:           string | null
   created_by:      string | null
