@@ -111,7 +111,7 @@ function LoginForm() {
       <div className={`relative z-10 w-full max-w-md transition-all duration-700 ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}>
 
         <div className="flex flex-col items-center mb-7">
-          <img src="/logintravel.png" />
+          <img src="/travelbg.png" />
           
         </div>
 
@@ -122,9 +122,9 @@ function LoginForm() {
           <div className="text-center mb-1">
             <h1 className="text-xl font-bold text-white">Welcome back</h1>
             <p className="text-sm text-white/60 mt-1">
-              No account?{' '}
+              No account on Travixa?{' '}
               <Link href="/register" className="text-[#ffb96d] font-medium hover:underline">
-                Register your agency
+                Register your agency today!
               </Link>
             </p>
           </div>

@@ -604,3 +604,4 @@ export type FlightLeg = {
   layover_minutes: number | null
   created_at:      string
 }
+

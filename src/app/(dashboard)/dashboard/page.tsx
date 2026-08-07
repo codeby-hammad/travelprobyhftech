@@ -135,17 +135,21 @@ export default async function DashboardPage() {
       : [{ data: [] }, { data: [] }, { data: [] }, { data: [] }, { data: [] }]
 
   // ── TICKETING data ───────────────────────────────────────────────────────────
-  const [batchesRes, todaySalesRes, recentSalesRes, batchSalesTodayRes, allDailySalesRes, allBatchSalesRes] =
+  // Note: ticket_seats.created_by is never actually set by the sell-ticket
+  // forms (only ticket_passengers gets it) — so any "who sold this" query
+  // must go through ticket_passengers, not ticket_seats.
+  const [batchesRes, todaySalesRes, recentSalesRes, batchSalesTodayRes, allDailySalesRes, allBatchSalesRes, recentBatchSalesRes] =
     isTicketing
       ? await Promise.all([
           supabase.from('ticket_batch_summary').select('*').eq('organization_id', orgId).limit(5),
           supabase.from('daily_ticket_sales').select('id, sold_price').eq('organization_id', orgId).eq('created_by', user!.id).gte('sale_date', today),
           supabase.from('daily_ticket_sales').select('id, buyer_name, receipt_number, sold_price, sale_date, route_from, route_to').eq('organization_id', orgId).eq('created_by', user!.id).order('created_at', { ascending: false }).limit(8),
-          supabase.from('ticket_seats').select('id, sold_price').eq('organization_id', orgId).eq('created_by', user!.id).eq('status', 'sold').gte('sold_date', today),
+          supabase.from('ticket_passengers').select('id, ticket_price').eq('organization_id', orgId).eq('created_by', user!.id).gte('created_at', today),
           supabase.from('daily_ticket_sales').select('sold_price').eq('organization_id', orgId).eq('created_by', user!.id),
-          supabase.from('ticket_seats').select('sold_price').eq('organization_id', orgId).eq('created_by', user!.id).eq('status', 'sold'),
+          supabase.from('ticket_passengers').select('ticket_price').eq('organization_id', orgId).eq('created_by', user!.id),
+          supabase.from('ticket_passengers').select('id, full_name, ticket_price, eticket_number, pnr, created_at, batch:ticket_batches(route_from, route_to)').eq('organization_id', orgId).eq('created_by', user!.id).order('created_at', { ascending: false }).limit(8),
         ])
-      : [{ data: [] }, { data: [] }, { data: [] }, { data: [] }, { data: [] }, { data: [] }]
+      : [{ data: [] }, { data: [] }, { data: [] }, { data: [] }, { data: [] }, { data: [] }, { data: [] }]
 
   // ── ACCOUNTS data ────────────────────────────────────────────────────────────
   const [paymentsRes, paymentsMonthRes, supplierRes, overdueRes, invoicesRes] =
@@ -176,17 +180,43 @@ export default async function DashboardPage() {
 
   const batches          = batchesRes?.data         ?? []
   const todaySales       = todaySalesRes?.data      ?? []
-  const recentSales      = recentSalesRes?.data     ?? []
   const batchSalesToday  = batchSalesTodayRes?.data ?? []
   const allDailySales    = allDailySalesRes?.data   ?? []
   const allBatchSales    = allBatchSalesRes?.data   ?? []
   const totalTicketsToday = todaySales.length + batchSalesToday.length
   const todayRevenue =
     (todaySales as any[]).reduce((s, t: any) => s + Number(t.sold_price ?? 0), 0) +
-    (batchSalesToday as any[]).reduce((s, t: any) => s + Number(t.sold_price ?? 0), 0)
+    (batchSalesToday as any[]).reduce((s, t: any) => s + Number(t.ticket_price ?? 0), 0)
   const myTotalTicketRevenue =
     (allDailySales as any[]).reduce((s, t: any) => s + Number(t.sold_price ?? 0), 0) +
-    (allBatchSales as any[]).reduce((s, t: any) => s + Number(t.sold_price ?? 0), 0)
+    (allBatchSales as any[]).reduce((s, t: any) => s + Number(t.ticket_price ?? 0), 0)
+
+  // "My Recent Sales" merges both sale paths — walk-in daily sales AND
+  // batch-inventory sales — normalized to the same shape so the render
+  // below doesn't need to know which table each row came from
+  const dailySalesNormalized = ((recentSalesRes?.data ?? []) as any[]).map(s => ({
+    id:              s.id,
+    buyer_name:      s.buyer_name,
+    receipt_number:  s.receipt_number,
+    sold_price:      s.sold_price,
+    sale_date:       s.sale_date,
+    route_from:      s.route_from,
+    route_to:        s.route_to,
+    sort_key:        s.sale_date,
+  }))
+  const batchSalesNormalized = ((recentBatchSalesRes?.data ?? []) as any[]).map(s => ({
+    id:              s.id,
+    buyer_name:      s.full_name,
+    receipt_number:  s.eticket_number ?? s.pnr ?? s.id?.slice(0, 8),
+    sold_price:      s.ticket_price,
+    sale_date:       s.created_at?.slice(0, 10),
+    route_from:      s.batch?.route_from,
+    route_to:        s.batch?.route_to,
+    sort_key:        s.created_at,
+  }))
+  const recentSales = [...dailySalesNormalized, ...batchSalesNormalized]
+    .sort((a, b) => (b.sort_key ?? '').localeCompare(a.sort_key ?? ''))
+    .slice(0, 8)
 
   const payments      = paymentsRes?.data      ?? []
   const paymentsMonth = paymentsMonthRes?.data  ?? []
@@ -525,11 +555,11 @@ export default async function DashboardPage() {
                       <div className="px-5 py-3">
                         <div className="flex items-center justify-between">
                           <p className="text-[12px] font-mono text-blue-600 font-semibold">{b.batch_number}</p>
-                          <Badge variant="outline" className={`text-[10px] ${Number(b.available_seats) < 5 ? 'border-red-200 text-red-600 bg-red-50' : 'border-emerald-200 text-emerald-700 bg-emerald-50'}`}>
-                            {b.available_seats} seats
+                          <Badge variant="outline" className={`text-[10px] ${Number(b.seats_available) < 5 ? 'border-red-200 text-red-600 bg-red-50' : 'border-emerald-200 text-emerald-700 bg-emerald-50'}`}>
+                            {b.seats_available} seats
                           </Badge>
                         </div>
-                        <p className="text-[11px] text-slate-400 mt-0.5">{b.departure_city} → {b.arrival_city}</p>
+                        <p className="text-[11px] text-slate-400 mt-0.5">{b.route_from} → {b.route_to}</p>
                       </div>
                       {i < batches.length - 1 && <Separator className="mx-5 w-auto" />}
                     </div>

@@ -38,7 +38,6 @@ export default function ForcePasswordChangeForm() {
     }
 
     setLoading(true)
-
     try {
       // Update auth password
       const { error: authError } = await supabase.auth.updateUser({ password })
@@ -64,6 +63,8 @@ export default function ForcePasswordChangeForm() {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
+              <img src="/travel.png" alt="logon" />
+
       <div>
         <label className="block text-xs font-medium text-gray-600 mb-1">New password</label>
         <div className="relative">

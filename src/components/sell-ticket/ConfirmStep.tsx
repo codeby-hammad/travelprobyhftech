@@ -63,12 +63,18 @@ export default function ConfirmStep({
     const { data: { user } } = await supabase.auth.getUser()
 
     // Generate receipt + eticket
-    const [{ data: receiptNum }, { data: etNum }] = await Promise.all([
-      supabase.rpc('generate_daily_receipt').match(() => ({ data: null })),
+    const [receiptResult, etResult] = await Promise.all([
+      supabase.rpc('generate_daily_receipt'),
       supabase.rpc('generate_eticket_number', {
         airline_code: data.outbound.airline || data.legs[0]?.airline || 'TK'
-      }).match(() => ({ data: null })),
+      }),
     ])
+
+    if (receiptResult.error) console.error('Receipt number generation failed:', receiptResult.error)
+    if (etResult.error) console.error('E-ticket number generation failed:', etResult.error)
+
+    const receiptNum = receiptResult.data
+    const etNum       = etResult.data
 
     // Main airline/route from first leg
     const mainAirline = data.journey_type === 'connecting' || data.journey_type === 'multi_city'

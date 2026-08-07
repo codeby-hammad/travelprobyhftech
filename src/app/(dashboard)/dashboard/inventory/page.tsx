@@ -3,6 +3,9 @@ import Link              from 'next/link'
 import { Package, Plus, TrendingUp, AlertTriangle } from 'lucide-react'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { requirePermission } from '@/lib/requirePermission'
+import { can } from '@/lib/permissions'
+import InventorySearchBar from '@/components/inventory/InventorySearchBar'
+
 
 const statusStyles: Record<string, string> = {
   active:    'bg-green-50  text-green-700',
@@ -11,22 +14,64 @@ const statusStyles: Record<string, string> = {
   cancelled: 'bg-red-50    text-red-700',
 }
 
-export default async function InventoryPage() {
-    await requirePermission('tickets')
-
+export default async function InventoryPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string }>
+}) {
+  const { q } = await searchParams
+  const perms = await requirePermission('tickets')
+  const canViewFinancial = can(perms, 'financial')
   const supabase = await createClient()
 
- const { data: batches } = await supabase
+ const { data: rawBatches } = await supabase
   .from('ticket_batch_summary')
   .select('*')
   .neq('batch_number', 'SPOT')   // hide spot placeholder from batch list
   .order('created_at', { ascending: false })
+
+
+
+  // Search by departure/arrival city, airline, or batch number — works the
+  // same for owners and ticketing staff alike
+  const batches = q
+    ? (rawBatches ?? []).filter(b => {
+        const needle = q.toLowerCase()
+        return (
+          b.route_from?.toLowerCase().includes(needle) ||
+          b.route_to?.toLowerCase().includes(needle) ||
+          b.airline?.toLowerCase().includes(needle) ||
+          b.batch_number?.toLowerCase().includes(needle)
+        )
+      })
+    : (rawBatches ?? [])
   
   // Summary stats
   const totalInvestment  = batches?.reduce((s, b) => s + Number(b.total_investment),  0) ?? 0
   const totalRevenue     = batches?.reduce((s, b) => s + Number(b.total_revenue),     0) ?? 0
   const totalProfit      = batches?.reduce((s, b) => s + Number(b.gross_profit),      0) ?? 0
   const totalAvailable   = batches?.reduce((s, b) => s + Number(b.seats_available),   0) ?? 0
+
+  // Non-financial roles (e.g. Ticketing Staff) see their own sales instead of
+  // the org-wide total revenue — pulled from ticket_passengers, the actual
+  // per-passenger sale record that tracks who sold it (created_by)
+  let myRevenue = totalRevenue
+  if (!canViewFinancial) {
+    const { data: { user } } = await supabase.auth.getUser()
+    const batchIds = (batches ?? []).map(b => b.id)
+
+    if (user && batchIds.length > 0) {
+      const { data: myPassengers } = await supabase
+        .from('ticket_passengers')
+        .select('ticket_price')
+        .eq('created_by', user.id)
+        .in('batch_id', batchIds)
+
+      myRevenue = (myPassengers ?? []).reduce((s, p) => s + Number(p.ticket_price ?? 0), 0)
+    } else {
+      myRevenue = 0
+    }
+  }
 
   // Expiring soon (within 7 days)
   const expiringSoon = batches?.filter(b => {
@@ -59,9 +104,9 @@ export default async function InventoryPage() {
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+      <div className={canViewFinancial ? 'grid grid-cols-1 md:grid-cols-4 gap-4 mb-6' : 'grid grid-cols-1 md:grid-cols-2 gap-4 mb-6'}>
         {[
-          {
+          canViewFinancial && {
             label: 'Total investment',
             value: formatCurrency(totalInvestment),
             sub:   `${batches?.length ?? 0} batches`,
@@ -69,13 +114,13 @@ export default async function InventoryPage() {
             bg:    'bg-blue-50',
           },
           {
-            label: 'Total revenue',
-            value: formatCurrency(totalRevenue),
-            sub:   'From sold seats',
+            label: canViewFinancial ? 'Total revenue' : 'My Sales',
+            value: formatCurrency(canViewFinancial ? totalRevenue : myRevenue),
+            sub:   canViewFinancial ? 'From sold seats' : 'Seats you\u2019ve sold',
             color: 'text-purple-600',
             bg:    'bg-purple-50',
           },
-          {
+          canViewFinancial && {
             label: 'Gross profit',
             value: formatCurrency(totalProfit),
             sub:   totalInvestment > 0
@@ -91,7 +136,7 @@ export default async function InventoryPage() {
             color: 'text-orange-600',
             bg:    'bg-orange-50',
           },
-        ].map(card => (
+        ].filter(Boolean).map((card: any) => (
           <div key={card.label} className="bg-white rounded-xl border border-gray-100 p-5">
             <div className={`w-10 h-10 ${card.bg} rounded-lg flex items-center justify-center mb-3`}>
               <TrendingUp size={18} className={card.color} />
@@ -101,6 +146,16 @@ export default async function InventoryPage() {
             <p className="text-xs text-gray-400 mt-0.5">{card.sub}</p>
           </div>
         ))}
+      </div>
+
+      {/* Search */}
+      <div className="flex items-center gap-3 mb-5">
+        <InventorySearchBar />
+        {q && (
+          <p className="text-xs text-gray-400">
+            {batches.length} result{batches.length !== 1 ? 's' : ''} for "{q}"
+          </p>
+        )}
       </div>
 
       {/* Expiry alert */}
@@ -123,17 +178,28 @@ export default async function InventoryPage() {
         </div>
       )}
 
-      {(!batches || batches.length === 0) && (
+      {batches.length === 0 && (
         <div className="text-center py-20 bg-white rounded-xl border border-gray-100">
           <Package size={40} className="mx-auto text-gray-300 mb-3" />
-          <p className="text-gray-500 font-medium">No ticket batches yet</p>
-          <p className="text-gray-400 text-sm mt-1">
-            Bulk mein seats khareed kar inventory shuru karein
-          </p>
-          <Link href="/dashboard/inventory/new"
-            className="mt-4 inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition text-sm">
-            <Plus size={15} /> Buy First Batch
-          </Link>
+          {q ? (
+            <>
+              <p className="text-gray-500 font-medium">No batches match "{q}"</p>
+              <p className="text-gray-400 text-sm mt-1">
+                Try a different city, country, or airline name
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="text-gray-500 font-medium">No ticket batches yet</p>
+              <p className="text-gray-400 text-sm mt-1">
+                Bulk mein seats khareed kar inventory shuru karein
+              </p>
+              <Link href="/dashboard/inventory/new"
+                className="mt-4 inline-flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition text-sm">
+                <Plus size={15} /> Buy First Batch
+              </Link>
+            </>
+          )}
         </div>
       )}
 
@@ -184,13 +250,15 @@ export default async function InventoryPage() {
                   </div>
                 </div>
 
-                {/* ROI badge */}
-                <div className={`text-right ${profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                  <p className="text-2xl font-black">
-                    {profit >= 0 ? '+' : ''}{roi}%
-                  </p>
-                  <p className="text-xs opacity-70">ROI</p>
-                </div>
+                {/* ROI badge — only for roles with financial visibility */}
+                {canViewFinancial && (
+                  <div className={`text-right ${profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    <p className="text-2xl font-black">
+                      {profit >= 0 ? '+' : ''}{roi}%
+                    </p>
+                    <p className="text-xs opacity-70">ROI</p>
+                  </div>
+                )}
               </div>
 
               {/* Seat progress bar */}
@@ -229,9 +297,9 @@ export default async function InventoryPage() {
               </div>
 
               {/* Financial row */}
-              <div className="grid grid-cols-4 gap-3 pt-3 border-t border-gray-50">
+              <div className={canViewFinancial ? 'grid grid-cols-4 gap-3 pt-3 border-t border-gray-50' : 'grid grid-cols-2 gap-3 pt-3 border-t border-gray-50'}>
                 {[
-                  {
+                  canViewFinancial && {
                     label: 'Cost/seat',
                     value: formatCurrency(b.cost_per_seat, b.currency),
                     color: 'text-gray-900',
@@ -246,12 +314,12 @@ export default async function InventoryPage() {
                     value: formatCurrency(b.total_revenue, b.currency),
                     color: 'text-purple-600',
                   },
-                  {
+                  canViewFinancial && {
                     label: 'Profit so far',
                     value: formatCurrency(profit, b.currency),
                     color: profit >= 0 ? 'text-green-600' : 'text-red-600',
                   },
-                ].map(item => (
+                ].filter(Boolean).map((item: any) => (
                   <div key={item.label}>
                     <p className="text-xs text-gray-400">{item.label}</p>
                     <p className={`text-sm font-bold ${item.color}`}>{item.value}</p>

@@ -3,7 +3,7 @@
 import { useEffect, useRef, useCallback } from 'react'
 
 const INACTIVE_TIMEOUT = 10 * 60 * 1000  // 10 minutes
-const WARNING_DURATION = 60 * 1000        // 60 second warning before logout
+const WARNING_DURATION = 30 * 1000        // 60 second warning before logout
 
 type Options = {
   onWarning:  () => void   // show warning modal

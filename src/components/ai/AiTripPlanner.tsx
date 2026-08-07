@@ -15,8 +15,7 @@ const DESTINATIONS = [
   'New York, USA', 'Toronto, Canada', 'Sydney, Australia',
 ]
 
-const DEPARTURE_CITIES = [
-  'Karachi', 'Lahore', 'Islamabad', 'Peshawar', 'Quetta', 'Multan', 'Faisalabad'
+const DEPARTURE_CITIES = ['Karachi', 'Lahore', 'Islamabad', 'Peshawar', 'Quetta', 'Multan', 'Faisalabad'
 ]
 
 export default function AiTripPlanner() {
@@ -397,6 +396,8 @@ export default function AiTripPlanner() {
               </div>
             </div>
           )}
+
+
 
           {loading && (
             <div className="h-full flex items-center justify-center bg-white rounded-2xl border border-gray-100 min-h-96">
