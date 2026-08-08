@@ -11,7 +11,7 @@ import {
   UsersRound, FileText, Sparkles, Ticket,
   UserCheck, BookOpen, TrendingUp, CreditCard,
   UserCog, LogOut, Zap, FileSignature, Inbox,
-  ChevronLeft, ChevronRight
+  Receipt, ChevronLeft, ChevronRight
 } from 'lucide-react'
 
 type NavLink = {
@@ -53,6 +53,7 @@ const navGroups: NavGroup[] = [
     links: [
       { href: '/dashboard/sell-ticket', label: '⚡ Sell Ticket', icon: Zap,        module: 'tickets' },
       { href: '/dashboard/inventory',   label: 'Batch Stock',   icon: Ticket,     module: 'tickets' },
+      { href: '/dashboard/sell-ticket/slips', label: 'Sales Slips', icon: Receipt, module: 'tickets' },
       { href: '/dashboard/subagents',   label: 'Sub-Agents',    icon: UserCheck,  module: 'tickets' },
     ],
   },
